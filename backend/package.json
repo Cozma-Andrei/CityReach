@@ -1,0 +1,23 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "CityReach backend – OSM import, GeoJSON validation, FeatureLayer APIs",
+  "license": "MIT",
+  "author": "CityReach",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "dev": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@mapbox/geojsonhint": "^2.0.1",
+    "@turf/clean-coords": "^7.1.0",
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.2.1",
+    "firebase-admin": "^13.0.1",
+    "osmtogeojson": "^3.0.0-beta.5"
+  }
+}
