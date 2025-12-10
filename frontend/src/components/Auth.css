@@ -1,0 +1,113 @@
+.auth-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+  padding: 40px 20px;
+}
+
+.auth-panel {
+  background: #0f1b33;
+  border: 1px solid #1f2c47;
+  border-radius: 18px;
+  padding: 32px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 400px;
+}
+
+.auth-panel h2 {
+  margin: 0 0 24px;
+  color: #e2e8f0;
+  text-align: center;
+  font-size: 28px;
+  letter-spacing: -0.5px;
+}
+
+.auth-field {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 18px;
+  color: #cbd5e1;
+}
+
+.auth-field label {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.auth-field input {
+  padding: 12px;
+  border: 1px solid #253555;
+  background: #0b1324;
+  color: #e2e8f0;
+  border-radius: 10px;
+  font-size: 14px;
+  transition: border-color 150ms ease;
+}
+
+.auth-field input:focus {
+  outline: none;
+  border-color: #3b82f6;
+}
+
+.auth-error {
+  background: #7f1d1d;
+  border: 1px solid #991b1b;
+  color: #fca5a5;
+  padding: 12px;
+  border-radius: 10px;
+  margin-bottom: 18px;
+  font-size: 14px;
+}
+
+.auth-button {
+  width: 100%;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+  border: none;
+  padding: 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  box-shadow: 0 1px 3px rgba(59, 130, 246, 0.2);
+  margin-top: 8px;
+}
+
+.auth-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.3);
+}
+
+.auth-button:disabled {
+  background: #253555;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.auth-switch {
+  text-align: center;
+  margin-top: 24px;
+  color: #9fb4d5;
+  font-size: 14px;
+}
+
+.auth-link {
+  background: none;
+  border: none;
+  color: #8fb5ff;
+  cursor: pointer;
+  text-decoration: underline;
+  font-size: 14px;
+  padding: 0;
+  margin-left: 4px;
+  box-shadow: none;
+}
+
+.auth-link:hover {
+  color: #60a5fa;
+  transform: none;
+}

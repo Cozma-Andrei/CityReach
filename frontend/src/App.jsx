@@ -1,13 +1,16 @@
 import { useCallback, useState } from "react";
-import axios from "axios";
 import "@arcgis/core/assets/esri/themes/light/main.css";
 import "./App.css";
 import { useGeoMap } from "./hooks/useGeoMap";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-const DEFAULT_BBOX = "44.40,26.00,44.60,26.30"; // Bucharest-ish default
+import { useAuth } from "./contexts/AuthContext";
+import { Login } from "./components/Login";
+import { Register } from "./components/Register";
+import apiClient from "./utils/axiosConfig";
+const DEFAULT_BBOX = "44.40,26.00,44.60,26.30";
 
 function App() {
+  const { currentUser, logout } = useAuth();
+  const [authMode, setAuthMode] = useState("login");
   const [bbox, setBbox] = useState(DEFAULT_BBOX);
   const [osmType, setOsmType] = useState("stations");
   const [geojson, setGeojson] = useState(null);
@@ -39,7 +42,7 @@ function App() {
         setStatus("Import error: invalid BBOX (use south,west,north,east)");
         return;
       }
-      const { data } = await axios.post(`${API_URL}/api/import/osm`, {
+      const { data } = await apiClient.post("/api/import/osm", {
         bbox: bboxArr,
         type: osmType,
       });
@@ -62,7 +65,7 @@ function App() {
     if (!geojson) return;
     try {
       setStatus("Validating…");
-      const { data } = await axios.post(`${API_URL}/api/geojson/validate`, { geojson });
+      const { data } = await apiClient.post("/api/geojson/validate", { geojson });
       setCleanedGeojson(data.cleaned);
       setErrors(data.errors || []);
       setStatus(`Validated. ${data.errors?.length || 0} issues.`);
@@ -77,7 +80,7 @@ function App() {
     const payload = cleanedGeojson || geojson;
     try {
       setStatus("Saving to Firestore…");
-      await axios.post(`${API_URL}/api/feature-layers/${osmType}`, {
+      await apiClient.post(`/api/feature-layers/${osmType}`, {
         geojson: payload,
         metadata: { source: "osm", updatedAt: new Date().toISOString() },
       });
@@ -90,7 +93,7 @@ function App() {
   async function handleLoad(type) {
     try {
       setStatus(`Loading ${type} from Firestore…`);
-      const { data } = await axios.get(`${API_URL}/api/feature-layers/${type}`);
+      const { data } = await apiClient.get(`/api/feature-layers/${type}`);
       setGeojson(data.geojson);
       setCleanedGeojson(null);
       await addGeoJsonLayer(data.geojson, `${type} (saved)`);
@@ -114,14 +117,48 @@ function App() {
     }
   }, [bbox, goToBbox, setStatus]);
 
+  if (!currentUser) {
+    return (
+      <>
+        {authMode === "login" ? (
+          <Login onSwitchToRegister={() => setAuthMode("register")} />
+        ) : (
+          <Register onSwitchToLogin={() => setAuthMode("login")} />
+        )}
+      </>
+    );
+  }
+
   return (
     <div className="shell">
       <div className="hero">
         <div>
-          <h1>CityReach · GIS Console</h1>
+          <h1>CityReach</h1>
           <p className="tagline">
             Import OSM data, validate GeoJSON, and publish FeatureLayers for stations and neighborhoods with live map preview.
           </p>
+        </div>
+        <div style={{ marginLeft: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ color: "#9fb4d5", fontSize: "14px" }}>
+              {currentUser.email}
+            </span>
+            <button
+              onClick={logout}
+              style={{
+                background: "#7f1d1d",
+                color: "white",
+                border: "none",
+                padding: "8px 14px",
+                borderRadius: "10px",
+                cursor: "pointer",
+                fontSize: "13px",
+                fontWeight: "600",
+              }}
+            >
+              Deconectare
+            </button>
+          </div>
         </div>
       </div>
 

@@ -4,6 +4,7 @@ const dotenv = require("dotenv");
 const { importFromOSM, buildStationsQuery, buildNeighborhoodsQuery } = require("./osmService");
 const { validateGeoJSON } = require("./geojsonService");
 const { saveGeoJSON, readGeoJSON } = require("./featureLayerService");
+const { verifyToken } = require("./authMiddleware");
 
 dotenv.config();
 
@@ -14,6 +15,8 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
+
+app.use("/api", verifyToken);
 
 function normalizeBbox(bbox) {
   if (!bbox) throw new Error("Missing bbox");

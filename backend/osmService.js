@@ -35,11 +35,7 @@ async function importFromOSM(overpassQuery) {
   return geojson;
 }
 
-/**
- * Helpers to build common queries for stations and neighborhoods.
- */
 function buildStationsQuery(bbox) {
-  // bbox: [south,west,north,east]
   const bboxStr = bbox?.length === 4 ? bbox.join(",") : "";
   return `
     (
