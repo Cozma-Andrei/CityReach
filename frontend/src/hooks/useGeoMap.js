@@ -34,9 +34,11 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
   const mapRef = useRef(null);
   const viewRef = useRef(null);
   const layerRef = useRef(null);
+  const bufferGraphicsRef = useRef(null);
+  const stationsFeaturesRef = useRef(null);
   const isInitializedRef = useRef(false);
 
-  const addGeoJsonLayer = useCallback(async (featureCollection, title = "Layer") => {
+  const addGeoJsonLayer = useCallback(async (featureCollection, title = "Layer", buffersData = null) => {
     if (!featureCollection) return;
     if (!viewRef.current) {
       throw new Error("Map is not ready yet. Try again in a moment.");
@@ -47,63 +49,377 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
       viewRef.current.map.remove(layerRef.current);
     }
 
-    const prepared = mergeTags(featureCollection);
+    const isStations = title.toLowerCase() === "stations" || title.toLowerCase().includes("station");
+    const isNeighborhoods = title.toLowerCase() === "neighborhoods" || title.toLowerCase().includes("neighborhood");
+    const firstFeature = featureCollection.features && featureCollection.features.length > 0 ? featureCollection.features[0] : null;
+    const firstProps = firstFeature?.properties || {};
+    const isFromFirestore = title === "stations" || title === "neighborhoods" || 
+                           (firstProps.type || firstProps.population !== undefined);
+
+    const prepared = isFromFirestore ? featureCollection : mergeTags(featureCollection);
+    
+    if (isStations && buffersData) {
+      stationsFeaturesRef.current = { stations: prepared, buffers: buffersData };
+      console.log("Stations features ref set:", { 
+        stationsCount: prepared.features?.length, 
+        buffersCount: buffersData.features?.length,
+        firstStation: prepared.features?.[0],
+        firstBuffer: buffersData.features?.[0]
+      });
+    }
+    
+    const featuresMap = new Map();
+    if (isFromFirestore && prepared.features) {
+      prepared.features.forEach((f, index) => {
+        if (f.properties) {
+          const featureId = f.id || f.properties.id || index;
+          featuresMap.set(featureId, f);
+          featuresMap.set(index, f);
+          featuresMap.set(String(index), f);
+        }
+      });
+    }
+    
     const blob = new Blob([JSON.stringify(prepared)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
 
+    const popupTemplate = isFromFirestore && isStations
+      ? {
+          title: (evt) => {
+            const graphic = evt?.graphic;
+            if (!graphic) return "Station";
+            
+            const attrs = graphic.attributes || {};
+            let props = {};
+            
+            const objectId = attrs.__OBJECTID;
+            if (objectId !== undefined && prepared.features && prepared.features[objectId]) {
+              props = prepared.features[objectId].properties || {};
+            } else {
+              const featureId = attrs.id || attrs.ID || objectId;
+              if (featureId !== undefined && featuresMap.has(featureId)) {
+                props = featuresMap.get(featureId).properties || {};
+              } else if (featuresMap.has(String(featureId))) {
+                props = featuresMap.get(String(featureId)).properties || {};
+              }
+            }
+            
+            return attrs.name || props.name || "Station";
+          },
+          content: (evt) => {
+            const graphic = evt?.graphic;
+            if (!graphic) return "";
+            
+            const attrs = graphic.attributes || {};
+            let props = {};
+            
+            const objectId = attrs.__OBJECTID;
+            if (objectId !== undefined && prepared.features && prepared.features[objectId]) {
+              props = prepared.features[objectId].properties || {};
+            } else {
+              const featureId = attrs.id || attrs.ID || objectId;
+              if (featureId !== undefined && featuresMap.has(featureId)) {
+                props = featuresMap.get(featureId).properties || {};
+              } else if (featuresMap.has(String(featureId))) {
+                props = featuresMap.get(String(featureId)).properties || {};
+              }
+            }
+            
+            const rows = [];
+            const name = attrs.name || props.name;
+            const type = attrs.type || props.type;
+            const bufferRadius = attrs.bufferRadius || props.bufferRadius;
+            
+            if (name) rows.push(`<div><b>Name:</b> ${name}</div>`);
+            if (type) rows.push(`<div><b>Type:</b> ${type}</div>`);
+            if (bufferRadius) rows.push(`<div><b>Buffer Radius:</b> ${bufferRadius} m</div>`);
+            
+            return rows.length > 0 ? `<div style="font-size:14px; line-height:1.4;">${rows.join("")}</div>` : "";
+          },
+        }
+      : isFromFirestore && isNeighborhoods
+      ? {
+          title: (evt) => {
+            const graphic = evt?.graphic;
+            if (!graphic) return "Neighborhood";
+            
+            const attrs = graphic.attributes || {};
+            let props = {};
+            
+            const objectId = attrs.__OBJECTID;
+            if (objectId !== undefined && prepared.features && prepared.features[objectId]) {
+              props = prepared.features[objectId].properties || {};
+            } else {
+              const featureId = attrs.id || attrs.ID || objectId;
+              if (featureId !== undefined && featuresMap.has(featureId)) {
+                props = featuresMap.get(featureId).properties || {};
+              } else if (featuresMap.has(String(featureId))) {
+                props = featuresMap.get(String(featureId)).properties || {};
+              }
+            }
+            
+            return attrs.name || props.name || "Neighborhood";
+          },
+          content: (evt) => {
+            const graphic = evt?.graphic;
+            if (!graphic) return "";
+            
+            const attrs = graphic.attributes || {};
+            let props = {};
+            
+            const objectId = attrs.__OBJECTID;
+            if (objectId !== undefined && prepared.features && prepared.features[objectId]) {
+              props = prepared.features[objectId].properties || {};
+            } else {
+              const featureId = attrs.id || attrs.ID || objectId;
+              if (featureId !== undefined && featuresMap.has(featureId)) {
+                props = featuresMap.get(featureId).properties || {};
+              } else if (featuresMap.has(String(featureId))) {
+                props = featuresMap.get(String(featureId)).properties || {};
+              }
+            }
+            
+            const rows = [];
+            const name = attrs.name || props.name;
+            const population = attrs.population !== undefined ? attrs.population : props.population;
+            
+            if (name) rows.push(`<div><b>Name:</b> ${name}</div>`);
+            if (population !== undefined && population !== null) {
+              rows.push(`<div><b>Population:</b> ${population.toLocaleString()}</div>`);
+            }
+            
+            return rows.length > 0 ? `<div style="font-size:14px; line-height:1.4;">${rows.join("")}</div>` : "";
+          },
+        }
+      : {
+          title: (evt) => {
+            const graphic = evt?.graphic;
+            if (!graphic) return "Unknown";
+            
+            const attrs = graphic.attributes || {};
+            const tagsRaw = attrs.tags;
+            const tags = typeof tagsRaw === "string" ? safeParse(tagsRaw) : tagsRaw || {};
+            return (
+              firstFrom(attrs, tags, [
+                "name",
+                "official_name",
+                "loc_name",
+                "local_name",
+                "alt_name",
+              ]) || (isStations ? "Station" : "Neighborhood")
+            );
+          },
+          content: (evt) => {
+            const graphic = evt?.graphic;
+            if (!graphic) return "";
+            
+            const attrs = graphic.attributes || {};
+        
+        const tagsRaw = attrs.tags;
+        const tags = typeof tagsRaw === "string" ? safeParse(tagsRaw) : tagsRaw || {};
+        const val = (keys) => {
+          const result = firstFrom(attrs, tags, Array.isArray(keys) ? keys : [keys]);
+          return result && result !== "-" ? result : null;
+        };
+
+        const rows = [];
+        const name = val(["name", "official_name", "loc_name", "local_name", "alt_name"]);
+        if (name) rows.push(`<div><b>Name:</b> ${name}</div>`);
+        
+        if (isStations) {
+          const type = val(["public_transport", "railway", "highway", "type", "amenity"]);
+          if (type) rows.push(`<div><b>Type:</b> ${type}</div>`);
+          
+          const routes = val(["route_ref", "lines", "bus_routes", "tram_routes", "ref"]);
+          if (routes) rows.push(`<div><b>Routes:</b> ${routes}</div>`);
+          
+          const operator = val(["operator", "brand", "company"]);
+          if (operator) rows.push(`<div><b>Operator:</b> ${operator}</div>`);
+        } else {
+          const population = val(["population", "population:total", "pop"]);
+          if (population) rows.push(`<div><b>Population:</b> ${population}</div>`);
+        }
+
+        if (rows.length === 0 && tags && typeof tags === "object") {
+          const extras = Object.entries(tags)
+            .filter(([k, v]) => v && v !== "-" && v !== "")
+            .slice(0, 5)
+            .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`);
+          if (extras.length) {
+            rows.push(...extras);
+          }
+        }
+
+        return rows.length > 0 ? `<div style="font-size:14px; line-height:1.4;">${rows.join("")}</div>` : "";
+      },
+    };
+    
+    console.log("Creating layer with:", { title, isFromFirestore, isStations, isNeighborhoods });
+    if (isFromFirestore && prepared.features && prepared.features.length > 0) {
+      console.log("First feature properties:", prepared.features[0].properties);
+    }
+    
     const layer = new GeoJSONLayer({
       url,
       title,
       outFields: ["*"],
-      popupTemplate: {
-        title: (evt) => {
-          const attrs = evt?.graphic?.attributes || {};
-          const tagsRaw = attrs.tags;
-          const tags = typeof tagsRaw === "string" ? safeParse(tagsRaw) : tagsRaw || {};
-          return (
-            firstFrom(attrs, tags, [
-              "name",
-              "official_name",
-              "loc_name",
-              "local_name",
-              "alt_name",
-              "ref",
-              "@id",
-              "id",
-            ]) || "Station"
-          );
-        },
-        content: (evt) => {
-          const attrs = evt?.graphic?.attributes || {};
-          const tagsRaw = attrs.tags;
-          const tags = typeof tagsRaw === "string" ? safeParse(tagsRaw) : tagsRaw || {};
-          const val = (keys) => firstFrom(attrs, tags, Array.isArray(keys) ? keys : [keys]) ?? "-";
-
-          const rows = [
-            `<div><b>Name:</b> ${val(["name", "official_name", "loc_name", "local_name", "alt_name", "ref", "@id", "id"])}</div>`,
-            `<div><b>Type:</b> ${val(["public_transport", "railway", "highway", "type", "amenity", "category", "route", "bus", "tram", "light_rail"])}</div>`,
-            `<div><b>Lines / Routes:</b> ${val(["route_ref", "lines", "bus_routes", "tram_routes", "train_lines", "subway_lines", "light_rail_lines", "bus", "tram", "trolleybus", "subway", "ref"])}</div>`,
-            `<div><b>Operator:</b> ${val(["operator", "brand", "company"])}</div>`,
-            `<div><b>Network:</b> ${val(["network", "system", "agency"])}</div>`,
-          ];
-
-          const hasData = rows.some((r) => !r.includes("> -<"));
-          if (!hasData && tags && typeof tags === "object") {
-            const extras = Object.entries(tags)
-              .slice(0, 8)
-              .map(([k, v]) => `<div><b>${k}:</b> ${v}</div>`);
-            if (extras.length) {
-              rows.push("<hr/>");
-              rows.push(...extras);
+      fields: isFromFirestore 
+        ? (isStations 
+          ? [
+              { name: "name", type: "string" },
+              { name: "type", type: "string" },
+              { name: "bufferRadius", type: "double" },
+            ]
+          : [
+              { name: "name", type: "string" },
+              { name: "population", type: "double" },
+            ])
+        : undefined,
+      popupTemplate,
+    });
+    
+    layer.when(async () => {
+      console.log("Layer loaded successfully");
+      
+      if (isStations && stationsFeaturesRef.current?.buffers) {
+        const [{ default: GraphicsLayer }, { default: Polygon }, { default: SimpleFillSymbol }, { default: SimpleLineSymbol }, { default: Graphic }] = await Promise.all([
+          import("@arcgis/core/layers/GraphicsLayer"),
+          import("@arcgis/core/geometry/Polygon"),
+          import("@arcgis/core/symbols/SimpleFillSymbol"),
+          import("@arcgis/core/symbols/SimpleLineSymbol"),
+          import("@arcgis/core/Graphic")
+        ]);
+        
+        if (!bufferGraphicsRef.current) {
+          const bufferGraphicsLayer = new GraphicsLayer({ title: "Buffers" });
+          viewRef.current.map.add(bufferGraphicsLayer);
+          bufferGraphicsRef.current = bufferGraphicsLayer;
+          
+          const showBufferForStation = (graphic) => {
+            if (!graphic || !bufferGraphicsRef.current) {
+              console.log("showBufferForStation: missing graphic or bufferGraphicsRef", { graphic: !!graphic, bufferRef: !!bufferGraphicsRef.current });
+              return;
             }
-          }
-
-          return `<div style="font-size:14px; line-height:1.4;">${rows.join("")}</div>`;
-        },
-      },
+            
+            bufferGraphicsRef.current.removeAll();
+            
+            const attrs = graphic.attributes || {};
+            const objectId = attrs.__OBJECTID;
+            
+            console.log("showBufferForStation:", { objectId, attrs, stationsCount: stationsFeaturesRef.current?.stations?.features?.length, buffersCount: stationsFeaturesRef.current?.buffers?.features?.length });
+            
+            if (objectId !== undefined && stationsFeaturesRef.current?.stations?.features) {
+              let stationFeature = null;
+              let stationId = null;
+              
+              if (typeof objectId === "number" && stationsFeaturesRef.current.stations.features[objectId]) {
+                stationFeature = stationsFeaturesRef.current.stations.features[objectId];
+                stationId = stationFeature.id || stationFeature.properties?.id;
+              } else {
+                stationFeature = stationsFeaturesRef.current.stations.features.find(f => {
+                  const fid = f.id || f.properties?.id;
+                  const attrsId = attrs.id || attrs.ID;
+                  return fid === attrsId || fid === objectId || attrsId === objectId;
+                });
+                
+                if (stationFeature) {
+                  stationId = stationFeature.id || stationFeature.properties?.id;
+                } else if (attrs.id || attrs.ID) {
+                  stationId = attrs.id || attrs.ID;
+                }
+              }
+              
+              console.log("Found station feature:", stationFeature, "stationId:", stationId);
+              
+              if (stationId && stationsFeaturesRef.current.buffers?.features) {
+                const bufferFeature = stationsFeaturesRef.current.buffers.features.find(
+                  bf => {
+                    const match = bf.properties?.stationId === stationId || 
+                                 bf.id === `buffer_${stationId}` || 
+                                 bf.id?.endsWith(String(stationId)) ||
+                                 bf.id?.includes(String(stationId)) ||
+                                 (bf.properties?.stationId && bf.properties.stationId.toString() === stationId.toString());
+                    if (match) {
+                      console.log("Found buffer feature:", bf);
+                    }
+                    return match;
+                  }
+                );
+                
+                if (bufferFeature && bufferFeature.geometry) {
+                  console.log("Creating buffer graphic from:", bufferFeature.geometry);
+                  const coords = bufferFeature.geometry.coordinates;
+                  let rings = coords;
+                  if (bufferFeature.geometry.type === "Polygon") {
+                    rings = coords;
+                  } else if (bufferFeature.geometry.type === "MultiPolygon") {
+                    rings = coords[0];
+                  }
+                  
+                  const polygon = new Polygon({
+                    rings: rings,
+                    spatialReference: { wkid: 4326 }
+                  });
+                  
+                  const fillSymbol = new SimpleFillSymbol({
+                    color: [0, 100, 255, 0.2],
+                    outline: new SimpleLineSymbol({
+                      color: [0, 100, 255, 0.6],
+                      width: 2
+                    })
+                  });
+                  
+                  const bufferGraphic = new Graphic({
+                    geometry: polygon,
+                    symbol: fillSymbol
+                  });
+                  
+                  bufferGraphicsRef.current.add(bufferGraphic);
+                  console.log("Buffer graphic added to layer");
+                } else {
+                  console.log("No buffer feature found or missing geometry", { bufferFeature: !!bufferFeature, hasGeometry: bufferFeature?.geometry, stationId });
+                }
+              } else {
+                console.log("Could not find stationId for objectId:", objectId, "stationFeature:", stationFeature);
+              }
+            } else {
+              console.log("Missing stations or objectId:", { hasStations: !!stationsFeaturesRef.current?.stations?.features, objectId });
+            }
+          };
+          
+          const popupWatchHandle = viewRef.current.popup.watch("visible", (visible) => {
+            console.log("Popup visibility changed:", visible);
+            if (!visible && bufferGraphicsRef.current) {
+              bufferGraphicsRef.current.removeAll();
+            } else if (visible && viewRef.current.popup.selectedFeature) {
+              const selectedGraphic = viewRef.current.popup.selectedFeature;
+              console.log("Popup opened with selectedFeature:", selectedGraphic);
+              if (selectedGraphic?.layer === layer) {
+                showBufferForStation(selectedGraphic);
+              }
+            }
+          });
+          
+          const clickHandle = viewRef.current.on("click", async (event) => {
+            console.log("Map clicked");
+            const result = await viewRef.current.hitTest(event);
+            const graphic = result.results.find(r => r.graphic?.layer === layer)?.graphic;
+            console.log("Hit test result for stations layer:", graphic);
+            if (graphic) {
+              showBufferForStation(graphic);
+            }
+          });
+        }
+      }
+    }).catch(err => {
+      console.error("Layer load error:", err);
     });
 
+    if (layerRef.current && viewRef.current?.map) {
+      viewRef.current.map.remove(layerRef.current);
+    }
     layerRef.current = layer;
+    
     viewRef.current.map.add(layer);
     viewRef.current.goTo(layer);
   }, []);
@@ -140,9 +456,10 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
     let programmaticMove = false;
 
     async function initMap() {
-      const [{ default: Map }, { default: MapView }, wmModule] = await Promise.all([
+      const [{ default: Map }, { default: MapView }, { default: Popup }, wmModule] = await Promise.all([
         import("@arcgis/core/Map"),
         import("@arcgis/core/views/MapView"),
+        import("@arcgis/core/widgets/Popup"),
         import("@arcgis/core/geometry/support/webMercatorUtils"),
       ]);
       const webMercatorUtils = wmModule?.webMercatorToGeographic ? wmModule : wmModule?.default;
@@ -153,6 +470,14 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
         map,
         center: [26.1, 44.44],
         zoom: 11,
+        popup: new Popup({
+          dockEnabled: true,
+          dockOptions: {
+            buttonEnabled: true,
+            breakpoint: false,
+            position: "bottom-right",
+          },
+        }),
       });
       
       viewRef.current = view;

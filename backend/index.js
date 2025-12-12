@@ -3,7 +3,14 @@ const cors = require("cors");
 const dotenv = require("dotenv");
 const { importFromOSM, buildStationsQuery, buildNeighborhoodsQuery } = require("./osmService");
 const { validateGeoJSON } = require("./geojsonService");
-const { saveGeoJSON, readGeoJSON } = require("./featureLayerService");
+const { 
+  saveGeoJSON, 
+  readGeoJSON,
+  saveStations,
+  saveNeighborhoods,
+  readStations,
+  readNeighborhoods,
+} = require("./featureLayerService");
 const { verifyToken } = require("./authMiddleware");
 
 dotenv.config();
@@ -68,12 +75,25 @@ app.post("/api/geojson/validate", (req, res) => {
 app.post("/api/feature-layers/:type", async (req, res) => {
   try {
     const { type } = req.params;
-    const { geojson, metadata } = req.body;
+    const { geojson, bufferRadius } = req.body;
+    const userId = req.user?.uid;
+    
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+    
     if (!["stations", "neighborhoods"].includes(type)) {
       return res.status(400).json({ error: "Type must be stations or neighborhoods" });
     }
-    const saved = await saveGeoJSON(type, geojson, metadata);
-    res.json(saved);
+    
+    const [saved, geojsonSaved] = await Promise.all([
+      type === "stations" 
+        ? saveStations(geojson, bufferRadius, userId)
+        : saveNeighborhoods(geojson, userId),
+      saveGeoJSON(type, geojson, { source: "osm", updatedAt: new Date().toISOString() }, userId)
+    ]);
+    
+    res.json({ ...saved, geojsonSaved: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -82,12 +102,29 @@ app.post("/api/feature-layers/:type", async (req, res) => {
 app.get("/api/feature-layers/:type", async (req, res) => {
   try {
     const { type } = req.params;
+    const userId = req.user?.uid;
+    
+    if (!userId) {
+      return res.status(401).json({ error: "User not authenticated" });
+    }
+    
     if (!["stations", "neighborhoods"].includes(type)) {
       return res.status(400).json({ error: "Type must be stations or neighborhoods" });
     }
-    const data = await readGeoJSON(type);
-    if (!data) return res.status(404).json({ error: "Not found" });
-    res.json(data);
+    
+    if (type === "stations") {
+      const result = await readStations(userId);
+      if (!result.stations || !result.stations.features || result.stations.features.length === 0) {
+        return res.status(404).json({ error: "Not found" });
+      }
+      return res.json({ geojson: result.stations, buffers: result.buffers });
+    } else {
+      const geojson = await readNeighborhoods(userId);
+      if (!geojson || !geojson.features || geojson.features.length === 0) {
+        return res.status(404).json({ error: "Not found" });
+      }
+      return res.json({ geojson });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

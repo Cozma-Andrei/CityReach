@@ -76,15 +76,14 @@ function App() {
   }
 
   async function handleSave() {
-    if (!cleanedGeojson && !geojson) return;
-    const payload = cleanedGeojson || geojson;
+    if (!cleanedGeojson) return;
     try {
       setStatus("Saving to Firestore…");
-      await apiClient.post(`/api/feature-layers/${osmType}`, {
-        geojson: payload,
-        metadata: { source: "osm", updatedAt: new Date().toISOString() },
+      const { data } = await apiClient.post(`/api/feature-layers/${osmType}`, {
+        geojson: cleanedGeojson,
+        bufferRadius: 400,
       });
-      setStatus("Saved.");
+      setStatus(`Saved ${data.saved || 0} ${osmType} and GeoJSON to Firestore.`);
     } catch (err) {
       setStatus(err.response?.data?.error || err.message);
     }
@@ -94,10 +93,12 @@ function App() {
     try {
       setStatus(`Loading ${type} from Firestore…`);
       const { data } = await apiClient.get(`/api/feature-layers/${type}`);
-      setGeojson(data.geojson);
+      console.log("Loaded data:", { type, hasGeojson: !!data.geojson, hasBuffers: !!data.buffers, geojsonFeatures: data.geojson?.features?.length, bufferFeatures: data.buffers?.features?.length });
+      setGeojson(null);
       setCleanedGeojson(null);
-      await addGeoJsonLayer(data.geojson, `${type} (saved)`);
-      setStatus("Loaded.");
+      setErrors([]);
+      await addGeoJsonLayer(data.geojson, type, type === "stations" ? data.buffers : null);
+      setStatus(`Loaded ${data.geojson.features.length} ${type} from Firestore.`);
     } catch (err) {
       setStatus(err.response?.data?.error || err.message);
     }
@@ -195,8 +196,8 @@ function App() {
             <button onClick={handleValidate} disabled={!geojson}>
               Validate & Clean
             </button>
-            <button onClick={handleSave} disabled={!geojson}>
-              Save FeatureLayer (Firestore)
+            <button onClick={handleSave} disabled={!cleanedGeojson}>
+              Save to Firestore
             </button>
             <button onClick={applyBboxToMap}>Set map from BBOX</button>
             <button onClick={() => handleLoad("stations")}>Load saved stations</button>

@@ -52,8 +52,15 @@ function buildNeighborhoodsQuery(bbox) {
   const bboxStr = bbox?.length === 4 ? bbox.join(",") : "";
   return `
     (
-      relation["boundary"="administrative"]["admin_level"~"^(8|9|10)$"](${bboxStr});
+      relation["boundary"="administrative"]["admin_level"="8"](${bboxStr});
+      relation["boundary"="administrative"]["admin_level"="9"](${bboxStr});
+      relation["boundary"="administrative"]["admin_level"="10"](${bboxStr});
       way["place"="neighbourhood"](${bboxStr});
+      way["place"="suburb"](${bboxStr});
+      way["place"="quarter"](${bboxStr});
+      relation["place"="neighbourhood"](${bboxStr});
+      relation["place"="suburb"](${bboxStr});
+      relation["place"="quarter"](${bboxStr});
     );
   `;
 }
