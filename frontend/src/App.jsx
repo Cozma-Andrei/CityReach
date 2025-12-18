@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import "@arcgis/core/assets/esri/themes/light/main.css";
 import "./App.css";
 import { useGeoMap } from "./hooks/useGeoMap";
@@ -6,12 +6,31 @@ import { useAuth } from "./contexts/AuthContext";
 import { Login } from "./components/Login";
 import { Register } from "./components/Register";
 import apiClient from "./utils/axiosConfig";
-const DEFAULT_BBOX = "44.40,26.00,44.60,26.30";
+const DEFAULT_BBOX = "44.37,26.00,44.50,26.20";
+
+window.updatePopulation = async function(neighborhoodId, population) {
+  try {
+    const popNum = Number(population);
+    if (isNaN(popNum) || popNum < 0) {
+      alert("Population must be a non-negative number");
+      return false;
+    }
+    
+    await apiClient.patch(`/api/feature-layers/neighborhoods/${encodeURIComponent(neighborhoodId)}`, { population: popNum });
+    
+    return true;
+  } catch (err) {
+    console.error("Error updating population:", err);
+    alert(err.response?.data?.error || err.message || "Failed to update population");
+    return false;
+  }
+};
 
 function App() {
   const { currentUser, logout } = useAuth();
   const [authMode, setAuthMode] = useState("login");
   const [bbox, setBbox] = useState(DEFAULT_BBOX);
+  const [locationQuery, setLocationQuery] = useState("");
   const [osmType, setOsmType] = useState("stations");
   const [geojson, setGeojson] = useState(null);
   const [cleanedGeojson, setCleanedGeojson] = useState(null);
@@ -171,17 +190,86 @@ function App() {
           </div>
           <div className="controls">
             <div className="field">
-              <label>Bounding box (south,west,north,east)</label>
-              <input
-                value={bbox}
-                onChange={(e) => setBbox(e.target.value)}
-                onBlur={applyBboxToMap}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    applyBboxToMap();
-                  }
-                }}
-              />
+              <label>Location (city, country)</label>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <input
+                  placeholder="e.g., Bucharest, Romania"
+                  value={locationQuery}
+                  onChange={(e) => setLocationQuery(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter" && locationQuery.trim()) {
+                      try {
+                        setStatus("Geocoding location…");
+                        const { data } = await apiClient.post("/api/geocode", { query: locationQuery });
+                        console.log("Geocoding result:", data);
+                        
+                        let parts;
+                        const queryLower = locationQuery.toLowerCase();
+                        if (queryLower.includes("bucharest") || queryLower.includes("bucurești")) {
+                          parts = parseBboxInput(DEFAULT_BBOX);
+                          setBbox(DEFAULT_BBOX);
+                          setStatus(`Found: ${data.name} - Using default Bucharest extent`);
+                        } else {
+                          const [south, west, north, east] = data.bbox;
+                          const newBbox = `${south},${west},${north},${east}`;
+                          setBbox(newBbox);
+                          parts = [south, west, north, east];
+                          setStatus(`Found: ${data.name}`);
+                        }
+                        
+                        console.log("Moving map to:", parts);
+                        if (parts && parts.every(n => !isNaN(n) && n !== null && n !== undefined)) {
+                          await goToBbox(parts);
+                          setStatus(`Found: ${data.name} - Map updated`);
+                        } else {
+                          setStatus(`Found: ${data.name} - Invalid coordinates`);
+                        }
+                      } catch (err) {
+                        console.error("Geocoding error:", err);
+                        setStatus(err.response?.data?.error || err.message);
+                      }
+                    }
+                  }}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  onClick={async () => {
+                    if (!locationQuery.trim()) return;
+                    try {
+                      setStatus("Geocoding location…");
+                      const { data } = await apiClient.post("/api/geocode", { query: locationQuery });
+                      console.log("Geocoding result:", data);
+                      
+                      let parts;
+                      const queryLower = locationQuery.toLowerCase();
+                      if (queryLower.includes("bucharest") || queryLower.includes("bucurești")) {
+                        parts = parseBboxInput(DEFAULT_BBOX);
+                        setBbox(DEFAULT_BBOX);
+                        setStatus(`Found: ${data.name} - Using default Bucharest extent`);
+                      } else {
+                        const [south, west, north, east] = data.bbox;
+                        const newBbox = `${south},${west},${north},${east}`;
+                        setBbox(newBbox);
+                        parts = [south, west, north, east];
+                        setStatus(`Found: ${data.name}`);
+                      }
+                      
+                      console.log("Moving map to:", parts);
+                      if (parts && parts.every(n => !isNaN(n) && n !== null && n !== undefined)) {
+                        await goToBbox(parts);
+                        setStatus(`Found: ${data.name} - Map updated`);
+                      } else {
+                        setStatus(`Found: ${data.name} - Invalid coordinates`);
+                      }
+                    } catch (err) {
+                      console.error("Geocoding error:", err);
+                      setStatus(err.response?.data?.error || err.message);
+                    }
+                  }}
+                >
+                  Search
+                </button>
+              </div>
             </div>
             <div className="field">
               <label>Layer</label>
@@ -199,7 +287,6 @@ function App() {
             <button onClick={handleSave} disabled={!cleanedGeojson}>
               Save to Firestore
             </button>
-            <button onClick={applyBboxToMap}>Set map from BBOX</button>
             <button onClick={() => handleLoad("stations")}>Load saved stations</button>
             <button onClick={() => handleLoad("neighborhoods")}>Load saved neighborhoods</button>
           </div>

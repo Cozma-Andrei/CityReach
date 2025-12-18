@@ -391,10 +391,12 @@ async function readNeighborhoods(userId) {
         }
       }
       
+      const featureId = data.id || doc.id;
       features.push({
         type: "Feature",
-        id: data.id || doc.id,
+        id: featureId,
         properties: {
+          id: featureId,
           name: data.name,
           population: data.population,
         },

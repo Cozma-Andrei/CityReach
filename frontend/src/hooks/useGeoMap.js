@@ -76,7 +76,16 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
           featuresMap.set(featureId, f);
           featuresMap.set(index, f);
           featuresMap.set(String(index), f);
+          featuresMap.set(String(featureId), f);
         }
+      });
+    }
+    
+    if (isFromFirestore && prepared.features) {
+      prepared.features.forEach((f, index) => {
+        const featureId = f.id || f.properties?.id || index;
+        if (!f.properties) f.properties = {};
+        f.properties.id = featureId;
       });
     }
     
@@ -160,7 +169,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
             
             return attrs.name || props.name || "Neighborhood";
           },
-          content: (evt) => {
+          content: async (evt) => {
             const graphic = evt?.graphic;
             if (!graphic) return "";
             
@@ -179,16 +188,81 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
               }
             }
             
-            const rows = [];
             const name = attrs.name || props.name;
             const population = attrs.population !== undefined ? attrs.population : props.population;
+            const featureId = attrs.id || props.id || attrs.ID || props.ID || prepared.features?.[objectId]?.id || prepared.features?.[objectId]?.properties?.id;
             
-            if (name) rows.push(`<div><b>Name:</b> ${name}</div>`);
-            if (population !== undefined && population !== null) {
-              rows.push(`<div><b>Population:</b> ${population.toLocaleString()}</div>`);
+            console.log("Update population - featureId:", featureId, "attrs:", attrs, "props:", props, "objectId:", objectId);
+            
+            const container = document.createElement("div");
+            container.style.cssText = "font-size:14px; line-height:1.4;";
+            
+            if (name) {
+              const nameDiv = document.createElement("div");
+              nameDiv.innerHTML = `<b>Name:</b> ${name}`;
+              container.appendChild(nameDiv);
             }
             
-            return rows.length > 0 ? `<div style="font-size:14px; line-height:1.4;">${rows.join("")}</div>` : "";
+            const popDiv = document.createElement("div");
+            popDiv.style.cssText = "margin-top:8px;";
+            popDiv.innerHTML = `<b>Population:</b> <span class="pop-display">${population !== undefined && population !== null ? population.toLocaleString() : 0}</span>`;
+            container.appendChild(popDiv);
+            
+            const editDiv = document.createElement("div");
+            editDiv.style.cssText = "margin-top:12px; padding-top:12px; border-top:1px solid #ddd;";
+            
+            const label = document.createElement("label");
+            label.textContent = "Edit Population:";
+            label.style.cssText = "font-weight:600; display:block; margin-bottom:6px;";
+            
+            const inputContainer = document.createElement("div");
+            inputContainer.style.cssText = "display:flex; align-items:center; gap:8px;";
+            
+            const input = document.createElement("input");
+            input.type = "number";
+            input.value = population || 0;
+            input.min = "0";
+            input.style.cssText = "width:120px; padding:6px; border:1px solid #ccc; border-radius:4px; font-size:13px;";
+            
+            const updateBtn = document.createElement("button");
+            updateBtn.textContent = "Update";
+            updateBtn.style.cssText = "padding:6px 12px; background:#0079c1; color:white; border:none; border-radius:4px; cursor:pointer; font-size:13px;";
+            
+            updateBtn.addEventListener("click", async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const popValue = Number(input.value);
+              if (isNaN(popValue) || popValue < 0) {
+                alert("Population must be a non-negative number");
+                return;
+              }
+              
+              try {
+                updateBtn.disabled = true;
+                updateBtn.textContent = "Updating...";
+                const success = await window.updatePopulation(featureId, popValue);
+                if (success) {
+                  const popDisplay = container.querySelector(".pop-display");
+                  if (popDisplay) {
+                    popDisplay.textContent = popValue.toLocaleString();
+                  }
+                  input.value = popValue;
+                }
+              } catch (err) {
+                console.error("Update error:", err);
+              } finally {
+                updateBtn.disabled = false;
+                updateBtn.textContent = "Update";
+              }
+            });
+            
+            inputContainer.appendChild(input);
+            inputContainer.appendChild(updateBtn);
+            editDiv.appendChild(label);
+            editDiv.appendChild(inputContainer);
+            container.appendChild(editDiv);
+            
+            return container;
           },
         }
       : {
@@ -266,15 +340,18 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
       fields: isFromFirestore 
         ? (isStations 
           ? [
+              { name: "id", type: "string" },
               { name: "name", type: "string" },
               { name: "type", type: "string" },
               { name: "bufferRadius", type: "double" },
             ]
           : [
+              { name: "id", type: "string" },
               { name: "name", type: "string" },
               { name: "population", type: "double" },
             ])
         : undefined,
+      objectIdField: "id",
       popupTemplate,
     });
     
@@ -439,7 +516,12 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
         spatialReference: { wkid: 4326 },
       });
       
-      await viewRef.current.goTo(extent, { animate: true });
+      await viewRef.current.goTo(extent, { 
+        animate: true,
+        duration: 1000,
+        maxZoom: 15,
+        padding: { left: 50, top: 50, right: 50, bottom: 50 }
+      });
     },
     []
   );
@@ -468,8 +550,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
       view = new MapView({
         container: mapRef.current,
         map,
-        center: [26.1, 44.44],
-        zoom: 11,
         popup: new Popup({
           dockEnabled: true,
           dockOptions: {
@@ -483,7 +563,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
       viewRef.current = view;
       await view.when();
 
-      if (initialBboxParts) {
+      if (initialBboxParts && initialBboxParts.length === 4) {
         try {
           const [south, west, north, east] = initialBboxParts;
           const { default: Extent } = await import("@arcgis/core/geometry/Extent");
@@ -497,6 +577,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus }) {
           }), { animate: false });
           setTimeout(() => { programmaticMove = false; }, 1000);
         } catch (err) {
+          console.error("Error setting initial extent:", err);
           setStatus?.(err.message);
         }
       }
