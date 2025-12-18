@@ -5,6 +5,7 @@ import { useGeoMap } from "./hooks/useGeoMap";
 import { useAuth } from "./contexts/AuthContext";
 import { Login } from "./components/Login";
 import { Register } from "./components/Register";
+import { Landing } from "./components/Landing";
 import apiClient from "./utils/axiosConfig";
 const DEFAULT_BBOX = "44.37,26.00,44.50,26.20";
 
@@ -28,6 +29,7 @@ window.updatePopulation = async function(neighborhoodId, population) {
 
 function App() {
   const { currentUser, logout } = useAuth();
+  const [showLanding, setShowLanding] = useState(true);
   const [authMode, setAuthMode] = useState("login");
   const [bbox, setBbox] = useState(DEFAULT_BBOX);
   const [locationQuery, setLocationQuery] = useState("");
@@ -137,7 +139,16 @@ function App() {
     }
   }, [bbox, goToBbox, setStatus]);
 
+  useEffect(() => {
+    if (currentUser) {
+      setShowLanding(false);
+    }
+  }, [currentUser]);
+
   if (!currentUser) {
+    if (showLanding) {
+      return <Landing onNavigateToLogin={() => setShowLanding(false)} />;
+    }
     return (
       <>
         {authMode === "login" ? (

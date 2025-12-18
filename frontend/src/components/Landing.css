@@ -1,0 +1,116 @@
+.landing-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 80vh;
+  padding: 40px 20px;
+}
+
+.landing-content {
+  max-width: 900px;
+  width: 100%;
+  text-align: center;
+}
+
+.landing-hero {
+  margin-bottom: 48px;
+}
+
+.landing-title {
+  font-size: 56px;
+  font-weight: 700;
+  margin: 0 0 16px;
+  color: #e2e8f0;
+  letter-spacing: -1px;
+  background: linear-gradient(135deg, #60a5fa, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.landing-subtitle {
+  font-size: 20px;
+  color: #9fb4d5;
+  margin: 0 0 12px;
+  line-height: 1.6;
+}
+
+.landing-description {
+  font-size: 16px;
+  color: #cbd5e1;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.landing-features {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 24px;
+  margin-bottom: 48px;
+}
+
+.feature-card {
+  background: #0f1b33;
+  border: 1px solid #1f2c47;
+  border-radius: 16px;
+  padding: 24px;
+  text-align: left;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.feature-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+.feature-card h3 {
+  margin: 0 0 12px;
+  color: #e2e8f0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.feature-card p {
+  margin: 0;
+  color: #9fb4d5;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.landing-actions {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+}
+
+.landing-button {
+  padding: 14px 32px;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+  border: none;
+}
+
+.landing-button.primary {
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: white;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+}
+
+.landing-button.primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.landing-button.secondary {
+  background: #0f1b33;
+  color: #8fb5ff;
+  border: 1px solid #1f2c47;
+}
+
+.landing-button.secondary:hover {
+  background: #13213a;
+  transform: translateY(-1px);
+}
