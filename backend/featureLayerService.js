@@ -193,6 +193,22 @@ async function saveStations(geojson, bufferRadius = DEFAULT_BUFFER_RADIUS, userI
     const name = extractName(feature.properties || {});
     const type = extractStationType(feature.properties || {});
     
+    const props = feature.properties || {};
+    const lines = props.route_ref || 
+                  props.lines || 
+                  props.bus_routes || 
+                  props.tram_routes || 
+                  props.ref ||
+                  props["route_ref"] ||
+                  props["lines"] ||
+                  props["tram:ref"] ||
+                  props["subway:ref"] ||
+                  props["metro:ref"] ||
+                  props.network ||
+                  props.operator ||
+                  props["public_transport:version"] ||
+                  null;
+    
     const location = new admin.firestore.GeoPoint(coords.latitude, coords.longitude);
     
     const stationData = {
@@ -201,6 +217,7 @@ async function saveStations(geojson, bufferRadius = DEFAULT_BUFFER_RADIUS, userI
       type,
       location,
       bufferRadius: Math.max(300, Math.min(500, bufferRadius)),
+      lines: lines ? String(lines) : null,
       userId,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -276,11 +293,26 @@ async function saveNeighborhoods(geojson, userId) {
                       props.POPULATION ||
                       0;
     
+    let adminLevel = props.admin_level || props["admin_level"] || null;
+    
+    if (!adminLevel && props.tags) {
+      const tags = typeof props.tags === "string" ? JSON.parse(props.tags) : props.tags;
+      adminLevel = tags?.admin_level || tags?.["admin_level"] || null;
+    }
+    
+    if (!adminLevel) {
+      const placeType = props.place || props["place"];
+      if (placeType === "neighbourhood" || placeType === "suburb" || placeType === "quarter") {
+        adminLevel = "10";
+      }
+    }
+    
     const neighborhoodData = {
       id: rawId,
       name,
       population: Number(population) || 0,
       geometry: JSON.stringify(feature.geometry),
+      admin_level: adminLevel,
       userId,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -323,9 +355,11 @@ async function readStations(userId) {
         type: "Feature",
         id: data.id || doc.id,
         properties: {
+          id: data.id || doc.id,
           name: data.name,
           type: data.type,
           bufferRadius: data.bufferRadius,
+          lines: data.lines || null,
         },
         geometry: {
           type: "Point",
@@ -392,6 +426,8 @@ async function readNeighborhoods(userId) {
       }
       
       const featureId = data.id || doc.id;
+      const adminLevel = data.admin_level || null;
+      
       features.push({
         type: "Feature",
         id: featureId,
@@ -399,6 +435,7 @@ async function readNeighborhoods(userId) {
           id: featureId,
           name: data.name,
           population: data.population,
+          admin_level: adminLevel ? String(adminLevel) : null,
         },
         geometry: geometry,
       });

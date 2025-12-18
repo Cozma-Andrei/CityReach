@@ -88,14 +88,14 @@ function normalizeBbox(bbox) {
 
 app.post("/api/import/osm", async (req, res) => {
   try {
-    const { bbox, type, customQuery } = req.body;
+    const { bbox, type, customQuery, adminLevel } = req.body;
     const validatedBbox = customQuery ? null : normalizeBbox(bbox);
     const overpassQuery =
       customQuery ||
       (type === "stations"
         ? buildStationsQuery(validatedBbox)
         : type === "neighborhoods"
-          ? buildNeighborhoodsQuery(validatedBbox)
+          ? buildNeighborhoodsQuery(validatedBbox, adminLevel)
           : null);
 
     const geojson = await importFromOSM(overpassQuery);

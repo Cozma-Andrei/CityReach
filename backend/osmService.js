@@ -48,13 +48,17 @@ function buildStationsQuery(bbox) {
   `;
 }
 
-function buildNeighborhoodsQuery(bbox) {
+function buildNeighborhoodsQuery(bbox, adminLevel = "8,9,10") {
   const bboxStr = bbox?.length === 4 ? bbox.join(",") : "";
+  const levels = adminLevel ? adminLevel.split(",").map(l => l.trim()) : ["8", "9", "10"];
+  
+  const adminLevelQueries = levels.map(level => 
+    `relation["boundary"="administrative"]["admin_level"="${level}"](${bboxStr});`
+  ).join("\n      ");
+  
   return `
     (
-      relation["boundary"="administrative"]["admin_level"="8"](${bboxStr});
-      relation["boundary"="administrative"]["admin_level"="9"](${bboxStr});
-      relation["boundary"="administrative"]["admin_level"="10"](${bboxStr});
+      ${adminLevelQueries}
       way["place"="neighbourhood"](${bboxStr});
       way["place"="suburb"](${bboxStr});
       way["place"="quarter"](${bboxStr});

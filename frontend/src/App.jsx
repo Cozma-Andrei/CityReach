@@ -38,6 +38,16 @@ function App() {
   const [cleanedGeojson, setCleanedGeojson] = useState(null);
   const [errors, setErrors] = useState([]);
   const [status, setStatus] = useState("");
+  const [transportFilters, setTransportFilters] = useState({
+    bus: true,
+    tram: true,
+    metro: true,
+  });
+  const [adminLevelFilters, setAdminLevelFilters] = useState({
+    level8: true,
+    level9: true,
+    level10: true,
+  });
 
   function parseBboxInput(value) {
     const parts = value.split(",").map((v) => Number(v.trim()));
@@ -49,10 +59,12 @@ function App() {
     return [south, west, north, east];
   }
 
-  const { mapRef, addGeoJsonLayer, goToBbox } = useGeoMap({
+  const { mapRef, addGeoJsonLayer, goToBbox, updateTransportFilters, updateAdminLevelFilters, calculateIntersections } = useGeoMap({
     onBboxChange: setBbox,
     initialBboxParts: parseBboxInput(DEFAULT_BBOX),
     setStatus,
+    transportFilters,
+    adminLevelFilters,
   });
 
   async function handleImport() {
@@ -114,11 +126,20 @@ function App() {
     try {
       setStatus(`Loading ${type} from Firestore…`);
       const { data } = await apiClient.get(`/api/feature-layers/${type}`);
-      console.log("Loaded data:", { type, hasGeojson: !!data.geojson, hasBuffers: !!data.buffers, geojsonFeatures: data.geojson?.features?.length, bufferFeatures: data.buffers?.features?.length });
+      console.log("Loaded data:", { 
+        type, 
+        hasGeojson: !!data.geojson, 
+        hasBuffers: !!data.buffers, 
+        geojsonFeatures: data.geojson?.features?.length, 
+        bufferFeatures: data.buffers?.features?.length,
+        buffers: data.buffers
+      });
       setGeojson(null);
       setCleanedGeojson(null);
       setErrors([]);
-      await addGeoJsonLayer(data.geojson, type, type === "stations" ? data.buffers : null);
+      const buffersToPass = type === "stations" && data.buffers ? data.buffers : null;
+      console.log("Passing to addGeoJsonLayer:", { type, buffersToPass: !!buffersToPass, buffersFeatures: buffersToPass?.features?.length });
+      await addGeoJsonLayer(data.geojson, type, buffersToPass);
       setStatus(`Loaded ${data.geojson.features.length} ${type} from Firestore.`);
     } catch (err) {
       setStatus(err.response?.data?.error || err.message);
@@ -199,7 +220,7 @@ function App() {
             <h3>Import settings</h3>
             <span className="badge">BBOX + Layer type</span>
           </div>
-          <div className="controls">
+          <div className="controls" style={{ display: "grid", gridTemplateColumns: "1.2fr 240px", gap: "12px", alignItems: "start" }}>
             <div className="field">
               <label>Location (city, country)</label>
               <div style={{ display: "flex", gap: "8px" }}>
@@ -300,6 +321,9 @@ function App() {
             </button>
             <button onClick={() => handleLoad("stations")}>Load saved stations</button>
             <button onClick={() => handleLoad("neighborhoods")}>Load saved neighborhoods</button>
+            <button onClick={() => calculateIntersections(() => handleLoad("stations"), () => handleLoad("neighborhoods"))} style={{ backgroundColor: "#f59e0b", color: "white" }}>
+              Calculate Intersections
+            </button>
           </div>
           <div className="status">Status: {status}</div>
         </section>
@@ -321,6 +345,109 @@ function App() {
                   <li key={idx}>{err.message || JSON.stringify(err)}</li>
                 ))}
               </ul>
+            )}
+          </div>
+          <div className="panel">
+            <h3>Legend</h3>
+            {osmType === "stations" ? (
+              <div className="legend">
+                <div className="legend-item">
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", width: "100%" }}>
+                    <input
+                      type="checkbox"
+                      checked={transportFilters.bus}
+                      onChange={(e) => {
+                        setTransportFilters({ ...transportFilters, bus: e.target.checked });
+                        updateTransportFilters?.({ ...transportFilters, bus: e.target.checked });
+                      }}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <div className="legend-symbol" style={{ backgroundColor: "rgba(0, 150, 255, 0.8)", border: "1px solid rgba(255, 255, 255, 0.8)" }}></div>
+                    <span>Bus</span>
+                  </label>
+                </div>
+                <div className="legend-item">
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", width: "100%" }}>
+                    <input
+                      type="checkbox"
+                      checked={transportFilters.tram}
+                      onChange={(e) => {
+                        setTransportFilters({ ...transportFilters, tram: e.target.checked });
+                        updateTransportFilters?.({ ...transportFilters, tram: e.target.checked });
+                      }}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <div className="legend-symbol" style={{ backgroundColor: "rgba(255, 150, 0, 0.8)", border: "1px solid rgba(255, 255, 255, 0.8)" }}></div>
+                    <span>Tram</span>
+                  </label>
+                </div>
+                <div className="legend-item">
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", width: "100%" }}>
+                    <input
+                      type="checkbox"
+                      checked={transportFilters.metro}
+                      onChange={(e) => {
+                        setTransportFilters({ ...transportFilters, metro: e.target.checked });
+                        updateTransportFilters?.({ ...transportFilters, metro: e.target.checked });
+                      }}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <div className="legend-symbol" style={{ backgroundColor: "rgba(255, 0, 0, 0.8)", border: "1px solid rgba(255, 255, 255, 0.8)" }}></div>
+                    <span>Metro</span>
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <div className="legend">
+                <div className="legend-item">
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", width: "100%" }}>
+                    <input
+                      type="checkbox"
+                      checked={adminLevelFilters.level8}
+                      onChange={(e) => {
+                        const newFilters = { ...adminLevelFilters, level8: e.target.checked };
+                        setAdminLevelFilters(newFilters);
+                        setTimeout(() => updateAdminLevelFilters?.(newFilters), 0);
+                      }}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <div className="legend-symbol" style={{ backgroundColor: "rgba(100, 200, 100, 0.3)", border: "2px solid rgba(50, 150, 50, 0.8)" }}></div>
+                    <span>Level 8 (Districts)</span>
+                  </label>
+                </div>
+                <div className="legend-item">
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", width: "100%" }}>
+                    <input
+                      type="checkbox"
+                      checked={adminLevelFilters.level9}
+                      onChange={(e) => {
+                        const newFilters = { ...adminLevelFilters, level9: e.target.checked };
+                        setAdminLevelFilters(newFilters);
+                        setTimeout(() => updateAdminLevelFilters?.(newFilters), 0);
+                      }}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <div className="legend-symbol" style={{ backgroundColor: "rgba(100, 200, 100, 0.3)", border: "2px solid rgba(50, 150, 50, 0.8)" }}></div>
+                    <span>Level 9 (Sub-districts)</span>
+                  </label>
+                </div>
+                <div className="legend-item">
+                  <label style={{ display: "flex", alignItems: "center", gap: "10px", cursor: "pointer", width: "100%" }}>
+                    <input
+                      type="checkbox"
+                      checked={adminLevelFilters.level10}
+                      onChange={(e) => {
+                        const newFilters = { ...adminLevelFilters, level10: e.target.checked };
+                        setAdminLevelFilters(newFilters);
+                        setTimeout(() => updateAdminLevelFilters?.(newFilters), 0);
+                      }}
+                      style={{ cursor: "pointer" }}
+                    />
+                    <div className="legend-symbol" style={{ backgroundColor: "rgba(100, 200, 100, 0.3)", border: "2px solid rgba(50, 150, 50, 0.8)" }}></div>
+                    <span>Level 10 (Neighborhoods)</span>
+                  </label>
+                </div>
+              </div>
             )}
           </div>
         </div>
