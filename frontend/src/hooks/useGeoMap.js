@@ -36,6 +36,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
   const layerRef = useRef(null);
   const bufferGraphicsRef = useRef(null);
   const stationsFeaturesRef = useRef(null);
+  const neighborhoodsFeaturesRef = useRef(null);
   const stationsLayerRef = useRef(null);
   const neighborhoodsLayerRef = useRef(null);
   const intersectionsLayerRef = useRef(null);
@@ -71,8 +72,29 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     const [{ default: GeoJSONLayer }, ...rendererImports] = await Promise.all(imports);
 
     if (layerRef.current && viewRef.current?.map) {
-      console.log("Removing old layer:", layerRef.current.title);
-      viewRef.current.map.remove(layerRef.current);
+      const oldLayerTitle = layerRef.current.title?.toLowerCase() || "";
+      const oldIsStations = oldLayerTitle === "stations" || oldLayerTitle.includes("station");
+      const oldIsNeighborhoods = oldLayerTitle === "neighborhoods" || oldLayerTitle.includes("neighborhood");
+      
+      if ((isStations && oldIsStations) || (isNeighborhoods && oldIsNeighborhoods)) {
+        console.log("Removing old layer of same type:", layerRef.current.title);
+        viewRef.current.map.remove(layerRef.current);
+        layerRef.current = null;
+      } else {
+        console.log("Keeping old layer of different type:", layerRef.current.title);
+      }
+    }
+    
+    if (isStations && stationsLayerRef.current && viewRef.current?.map && stationsLayerRef.current !== layerRef.current) {
+      console.log("Removing old stations layer:", stationsLayerRef.current.title);
+      viewRef.current.map.remove(stationsLayerRef.current);
+      stationsLayerRef.current = null;
+    }
+    
+    if (isNeighborhoods && neighborhoodsLayerRef.current && viewRef.current?.map && neighborhoodsLayerRef.current !== layerRef.current) {
+      console.log("Removing old neighborhoods layer:", neighborhoodsLayerRef.current.title);
+      viewRef.current.map.remove(neighborhoodsLayerRef.current);
+      neighborhoodsLayerRef.current = null;
     }
     
     if (bufferGraphicsRef.current && viewRef.current?.map) {
@@ -86,6 +108,10 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
                            (firstProps.type || firstProps.population !== undefined);
 
     const prepared = isFromFirestore ? featureCollection : mergeTags(featureCollection);
+    
+    if (isNeighborhoods) {
+      neighborhoodsFeaturesRef.current = prepared;
+    }
     
     if (isStations && buffersData && buffersData.features && buffersData.features.length > 0) {
       stationsFeaturesRef.current = { stations: prepared, buffers: buffersData };
@@ -890,35 +916,41 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     if (!filters) return;
     
     currentAdminLevelFiltersRef.current = filters;
+    
+    const includedLevels = [];
+    if (filters.level8 === true) includedLevels.push("8");
+    if (filters.level9 === true) includedLevels.push("9");
+    if (filters.level10 === true) includedLevels.push("10");
+    
+    const definitionExpression = includedLevels.length === 0 
+      ? "1=0"
+      : includedLevels.length === 3
+        ? null
+        : `admin_level IN ('${includedLevels.join("','")}')`;
+    
+    // Apply to neighborhoods layer (could be regular or heatmap)
+    if (neighborhoodsLayerRef.current && neighborhoodsLayerRef.current.type === "geojson") {
+      neighborhoodsLayerRef.current.definitionExpression = definitionExpression;
+      console.log("Updated admin level filter for neighborhoods layer:", {
+        layerTitle: neighborhoodsLayerRef.current.title,
+        definitionExpression,
+        includedLevels
+      });
+    }
+    
+    // Also apply to layerRef if it's a neighborhoods layer
     if (layerRef.current && layerRef.current.type === "geojson") {
       const layerTitle = layerRef.current.title?.toLowerCase() || "";
       const isNeighborhoodsLayer = layerTitle === "neighborhoods" || layerTitle.includes("neighborhood");
       
       if (isNeighborhoodsLayer) {
-        const includedLevels = [];
-        if (filters.level8 === true) includedLevels.push("8");
-        if (filters.level9 === true) includedLevels.push("9");
-        if (filters.level10 === true) includedLevels.push("10");
-        
-        console.log("updateAdminLevelFilters called:", { filters, includedLevels, layerTitle });
-        
-        if (includedLevels.length === 0) {
-          layerRef.current.definitionExpression = "1=0";
-          console.log("All admin levels disabled for neighborhoods");
-        } else if (includedLevels.length === 3) {
-          layerRef.current.definitionExpression = null;
-          console.log("All admin levels enabled for neighborhoods");
-        } else {
-          const definitionExpression = `admin_level IN ('${includedLevels.join("','")}')`;
-          layerRef.current.definitionExpression = definitionExpression;
-          console.log("Updated definition expression for neighborhoods:", definitionExpression, "includedLevels:", includedLevels);
-        }
-      } else {
-        layerRef.current.definitionExpression = null;
-        console.log("Cleared definition expression for non-neighborhoods layer");
+        layerRef.current.definitionExpression = definitionExpression;
+        console.log("Updated admin level filter for layerRef:", {
+          layerTitle: layerRef.current.title,
+          definitionExpression,
+          includedLevels
+        });
       }
-    } else {
-      console.log("No layer or wrong layer type:", { hasLayer: !!layerRef.current, layerType: layerRef.current?.type });
     }
   }, []);
 
@@ -1322,5 +1354,750 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     }
   }, []);
 
-  return { mapRef, addGeoJsonLayer, goToBbox, updateTransportFilters, updateAdminLevelFilters, calculateIntersections };
+  const calculateNeighborhoodCoverage = useCallback(async (neighborhoodGeometry, neighborhoodAttrs) => {
+    if (!stationsFeaturesRef.current || !stationsFeaturesRef.current.stations) {
+      return 0;
+    }
+
+    const stations = stationsFeaturesRef.current.stations;
+    const geometryEngineModule = await import("@arcgis/core/geometry/geometryEngine");
+    const geometryEngine = geometryEngineModule.default || geometryEngineModule;
+    const { default: Point } = await import("@arcgis/core/geometry/Point");
+    const { default: Query } = await import("@arcgis/core/rest/support/Query");
+    const MAX_BUFFER_RADIUS = 500;
+
+    const intersectingGeometries = [];
+
+    try {
+      const expandedNeighborhood = geometryEngine.geodesicBuffer(neighborhoodGeometry, MAX_BUFFER_RADIUS, "meters");
+      const query = new Query();
+      query.geometry = expandedNeighborhood;
+      query.spatialRelationship = "intersects";
+      query.returnGeometry = true;
+      query.outFields = ["*"];
+      
+      if (!stationsLayerRef.current) return 0;
+      const { features } = await stationsLayerRef.current.queryFeatures(query);
+      
+      for (const feature of features) {
+        const stationId = feature.attributes?.id;
+        if (!stationId) continue;
+        
+        const stationGeoJSON = stations.features.find(s => 
+          (s.id === stationId) || (s.properties?.id === stationId)
+        );
+        
+        if (!stationGeoJSON || !stationGeoJSON.geometry) continue;
+        
+        const bufferRadius = stationGeoJSON.properties?.bufferRadius || 400;
+        const coords = stationGeoJSON.geometry.coordinates;
+        
+        const stationPoint = new Point({
+          longitude: coords[0],
+          latitude: coords[1],
+          spatialReference: neighborhoodGeometry.spatialReference || { wkid: 4326 }
+        });
+        
+        try {
+          const bufferGeometry = geometryEngine.geodesicBuffer(stationPoint, bufferRadius, "meters");
+          if (!bufferGeometry) continue;
+          
+          const intersects = geometryEngine.intersects(bufferGeometry, neighborhoodGeometry);
+          if (intersects) {
+            try {
+              const intersection = geometryEngine.intersect(bufferGeometry, neighborhoodGeometry);
+              if (intersection && intersection.type && (intersection.rings || intersection.paths)) {
+                intersectingGeometries.push(intersection);
+              }
+            } catch (intersectErr) {
+              // Ignore intersection errors
+            }
+          }
+        } catch (bufferErr) {
+          // Ignore buffer errors
+        }
+      }
+    } catch (queryErr) {
+      // Fallback to checking all stations
+      for (let i = 0; i < stations.features.length; i++) {
+        const stationFeature = stations.features[i];
+        if (!stationFeature.geometry || stationFeature.geometry.type !== "Point") continue;
+
+        try {
+          const stationId = stationFeature.id || stationFeature.properties?.id;
+          const bufferRadius = stationFeature.properties?.bufferRadius || 400;
+          
+          if (!stationId) continue;
+
+          const coords = stationFeature.geometry.coordinates;
+          const stationPoint = new Point({
+            longitude: coords[0],
+            latitude: coords[1],
+            spatialReference: neighborhoodGeometry.spatialReference || { wkid: 4326 }
+          });
+
+          const bufferGeometry = geometryEngine.geodesicBuffer(stationPoint, bufferRadius, "meters");
+          if (!bufferGeometry) continue;
+          
+          const intersects = geometryEngine.intersects(bufferGeometry, neighborhoodGeometry);
+          
+          if (intersects) {
+            try {
+              const intersection = geometryEngine.intersect(bufferGeometry, neighborhoodGeometry);
+              if (intersection && intersection.type && (intersection.rings || intersection.paths)) {
+                intersectingGeometries.push(intersection);
+              }
+            } catch (intersectErr) {
+              // Ignore
+            }
+          }
+        } catch (err) {
+          // Ignore
+        }
+      }
+    }
+
+    if (intersectingGeometries.length === 0) {
+      return 0;
+    }
+
+    try {
+      // Try to union all at once first
+      let unionGeometry;
+      try {
+        if (intersectingGeometries.length === 1) {
+          unionGeometry = intersectingGeometries[0];
+        } else {
+          // Try union with array
+          unionGeometry = geometryEngine.union(intersectingGeometries);
+          if (!unionGeometry) {
+            throw new Error("Union with array returned null");
+          }
+        }
+      } catch (unionArrayErr) {
+        // Fallback to incremental union
+        unionGeometry = intersectingGeometries[0];
+        for (let i = 1; i < intersectingGeometries.length; i++) {
+          const newUnion = geometryEngine.union(unionGeometry, intersectingGeometries[i]);
+          if (newUnion) {
+            const oldArea = geometryEngine.geodesicArea(unionGeometry, "square-meters");
+            const newArea = geometryEngine.geodesicArea(newUnion, "square-meters");
+            if (newArea >= oldArea) {
+              unionGeometry = newUnion;
+            }
+          }
+        }
+      }
+      
+      const neighborhoodArea = geometryEngine.geodesicArea(neighborhoodGeometry, "square-meters");
+      const coverageArea = geometryEngine.geodesicArea(unionGeometry, "square-meters");
+      
+      if (neighborhoodArea > 0 && coverageArea > 0) {
+        const percentage = (coverageArea / neighborhoodArea) * 100;
+        // Clamp to 0-100%
+        return Math.min(100, Math.max(0, percentage));
+      }
+    } catch (areaErr) {
+      console.warn("Error calculating coverage:", areaErr);
+    }
+
+    return 0;
+  }, []);
+
+  const setupNeighborhoodClickFilter = useCallback(async () => {
+    if (!viewRef.current || !stationsLayerRef.current || !neighborhoodsLayerRef.current) {
+      return;
+    }
+
+    if (neighborhoodClickHandlerRef.current) {
+      if (typeof neighborhoodClickHandlerRef.current === "function") {
+        neighborhoodClickHandlerRef.current();
+      } else if (neighborhoodClickHandlerRef.current && typeof neighborhoodClickHandlerRef.current.remove === "function") {
+        neighborhoodClickHandlerRef.current.remove();
+      }
+      neighborhoodClickHandlerRef.current = null;
+    }
+
+    const neighborhoodsLayer = neighborhoodsLayerRef.current;
+    const stationsLayer = stationsLayerRef.current;
+
+    const clickHandler = async (event) => {
+      event.stopPropagation();
+      
+      const hitTestResult = await viewRef.current.hitTest(event);
+      
+      const neighborhoodGraphic = hitTestResult.results.find(
+        r => r.graphic?.layer === neighborhoodsLayer
+      )?.graphic;
+      
+      const stationsGraphic = hitTestResult.results.find(
+        r => r.graphic?.layer === stationsLayer
+      )?.graphic;
+      
+      if (!neighborhoodGraphic || !neighborhoodGraphic.geometry) {
+        console.log("Click was not on neighborhoods layer, ignoring");
+        return;
+      }
+
+      if (stationsGraphic) {
+        console.log("Click is on both layers, prioritizing neighborhoods filtering");
+      }
+
+      console.log("Neighborhood clicked, filtering stations");
+      
+      const geometryEngineModule = await import("@arcgis/core/geometry/geometryEngine");
+      const geometryEngine = geometryEngineModule.default || geometryEngineModule;
+      
+      if (!geometryEngine || typeof geometryEngine.intersects !== "function") {
+        console.error("geometryEngine not available");
+        return;
+      }
+
+      const neighborhoodGeometry = neighborhoodGraphic.geometry;
+      const neighborhoodAttrs = neighborhoodGraphic.attributes || {};
+      
+      if (!stationsFeaturesRef.current || !stationsFeaturesRef.current.stations) {
+        setStatus?.("Stations data is missing. Please reload stations.");
+        return;
+      }
+
+      const stations = stationsFeaturesRef.current.stations;
+      const intersectingStationIds = new Set();
+      let coveragePercentage = 0;
+
+      console.log("Filtering stations for neighborhood (including buffers):", {
+        neighborhoodName: neighborhoodAttrs.name,
+        stationsCount: stations.features.length,
+        neighborhoodSR: neighborhoodGeometry.spatialReference?.wkid
+      });
+
+      const { default: Point } = await import("@arcgis/core/geometry/Point");
+      const { default: Query } = await import("@arcgis/core/rest/support/Query");
+      const MAX_BUFFER_RADIUS = 500;
+
+      try {
+        const expandedNeighborhood = geometryEngine.geodesicBuffer(neighborhoodGeometry, MAX_BUFFER_RADIUS, "meters");
+        
+        const query = new Query();
+        query.geometry = expandedNeighborhood;
+        query.spatialRelationship = "intersects";
+        query.returnGeometry = true;
+        query.outFields = ["*"];
+        
+        const { features } = await stationsLayer.queryFeatures(query);
+        
+        console.log("Query returned", features.length, "potentially intersecting stations (within", MAX_BUFFER_RADIUS, "m of neighborhood)");
+        
+        const intersectingGeometries = [];
+        
+        for (const feature of features) {
+          const stationId = feature.attributes?.id;
+          if (!stationId) continue;
+          
+          const stationGeoJSON = stations.features.find(s => 
+            (s.id === stationId) || (s.properties?.id === stationId)
+          );
+          
+          if (!stationGeoJSON || !stationGeoJSON.geometry) continue;
+          
+          const bufferRadius = stationGeoJSON.properties?.bufferRadius || 400;
+          const coords = stationGeoJSON.geometry.coordinates;
+          
+          const stationPoint = new Point({
+            longitude: coords[0],
+            latitude: coords[1],
+            spatialReference: neighborhoodGeometry.spatialReference || { wkid: 4326 }
+          });
+          
+          try {
+            const bufferGeometry = geometryEngine.geodesicBuffer(stationPoint, bufferRadius, "meters");
+            if (!bufferGeometry) continue;
+            
+            const intersects = geometryEngine.intersects(bufferGeometry, neighborhoodGeometry);
+            if (intersects) {
+              intersectingStationIds.add(String(stationId));
+              
+              if (intersectingStationIds.size <= 3) {
+                console.log("Testing intersection calculation for station", stationId, {
+                  bufferType: bufferGeometry.type,
+                  bufferSR: bufferGeometry.spatialReference?.wkid,
+                  neighborhoodType: neighborhoodGeometry.type,
+                  neighborhoodSR: neighborhoodGeometry.spatialReference?.wkid,
+                  hasIntersectsMethod: typeof geometryEngine.intersect === "function"
+                });
+              }
+              
+              try {
+                const intersection = geometryEngine.intersect(bufferGeometry, neighborhoodGeometry);
+                
+                if (intersectingStationIds.size <= 3) {
+                  console.log("Intersection result for station", stationId, {
+                    hasResult: !!intersection,
+                    type: intersection?.type,
+                    hasRings: !!intersection?.rings,
+                    ringsCount: intersection?.rings?.length,
+                    hasPaths: !!intersection?.paths,
+                    isEmpty: intersection?.isEmpty,
+                    spatialReference: intersection?.spatialReference?.wkid,
+                    toString: intersection?.toString?.()
+                  });
+                }
+                
+                if (intersection) {
+                  const hasRings = intersection.rings && Array.isArray(intersection.rings) && intersection.rings.length > 0;
+                  const hasPaths = intersection.paths && Array.isArray(intersection.paths) && intersection.paths.length > 0;
+                  const hasType = intersection.type && typeof intersection.type === "string";
+                  
+                  if (hasType && (hasRings || hasPaths)) {
+                    intersectingGeometries.push(intersection);
+                    if (intersectingGeometries.length <= 5) {
+                      console.log("✓ Added intersection geometry for station", stationId, {
+                        type: intersection.type,
+                        hasRings,
+                        ringsCount: intersection.rings?.length,
+                        hasPaths,
+                        pathsCount: intersection.paths?.length
+                      });
+                    }
+                  } else {
+                    if (intersectingStationIds.size <= 5) {
+                      console.warn("Intersection invalid structure for station", stationId, {
+                        hasType,
+                        hasRings,
+                        hasPaths,
+                        type: intersection.type,
+                        keys: Object.keys(intersection)
+                      });
+                    }
+                  }
+                } else {
+                  if (intersectingStationIds.size <= 3) {
+                    console.warn("Intersection is null/undefined for station", stationId);
+                  }
+                }
+              } catch (intersectErr) {
+                console.error("Error calculating intersection for station", stationId, intersectErr);
+                if (intersectingStationIds.size <= 3) {
+                  console.error("Error details:", {
+                    message: intersectErr.message,
+                    stack: intersectErr.stack,
+                    name: intersectErr.name
+                  });
+                }
+              }
+            }
+          } catch (bufferErr) {
+            console.warn("Error checking buffer for station", stationId, bufferErr);
+          }
+        }
+        
+        console.log("After buffer check, found", intersectingStationIds.size, "stations with intersecting buffers");
+        console.log("Intersecting geometries count:", intersectingGeometries.length);
+        
+        if (intersectingGeometries.length > 0) {
+          try {
+            let unionGeometry;
+            
+            if (intersectingGeometries.length === 1) {
+              unionGeometry = intersectingGeometries[0];
+            } else {
+              try {
+                unionGeometry = geometryEngine.union(intersectingGeometries);
+                if (!unionGeometry) {
+                  throw new Error("Union with array returned null");
+                }
+              } catch (unionArrayErr) {
+                // Fallback to incremental union with area validation
+                unionGeometry = intersectingGeometries[0];
+                for (let i = 1; i < intersectingGeometries.length; i++) {
+                  const newUnion = geometryEngine.union(unionGeometry, intersectingGeometries[i]);
+                  if (newUnion) {
+                    const oldArea = geometryEngine.geodesicArea(unionGeometry, "square-meters");
+                    const newArea = geometryEngine.geodesicArea(newUnion, "square-meters");
+                    if (newArea >= oldArea) {
+                      unionGeometry = newUnion;
+                    }
+                  }
+                }
+              }
+            }
+            
+            const neighborhoodArea = geometryEngine.geodesicArea(neighborhoodGeometry, "square-meters");
+            const coverageArea = geometryEngine.geodesicArea(unionGeometry, "square-meters");
+            
+            if (neighborhoodArea > 0 && coverageArea > 0) {
+              coveragePercentage = Math.min(100, Math.max(0, (coverageArea / neighborhoodArea) * 100));
+            }
+          } catch (areaErr) {
+            console.error("Error calculating coverage area:", areaErr);
+          }
+        }
+      } catch (queryErr) {
+        console.error("Error querying stations layer:", queryErr);
+        
+        console.log("Falling back to checking all stations...");
+        
+        let checkedCount = 0;
+        let intersectionCount = 0;
+        const intersectingGeometries = [];
+
+        for (let i = 0; i < stations.features.length; i++) {
+          const stationFeature = stations.features[i];
+          if (!stationFeature.geometry || stationFeature.geometry.type !== "Point") continue;
+
+          try {
+            checkedCount++;
+            const stationId = stationFeature.id || stationFeature.properties?.id;
+            const bufferRadius = stationFeature.properties?.bufferRadius || 400;
+            
+            if (!stationId) continue;
+
+            const coords = stationFeature.geometry.coordinates;
+            const stationPoint = new Point({
+              longitude: coords[0],
+              latitude: coords[1],
+              spatialReference: neighborhoodGeometry.spatialReference || { wkid: 4326 }
+            });
+
+            const bufferGeometry = geometryEngine.geodesicBuffer(stationPoint, bufferRadius, "meters");
+            if (!bufferGeometry) continue;
+            
+            const intersects = geometryEngine.intersects(bufferGeometry, neighborhoodGeometry);
+            
+            if (intersects) {
+              intersectionCount++;
+              intersectingStationIds.add(String(stationId));
+              try {
+                const intersection = geometryEngine.intersect(bufferGeometry, neighborhoodGeometry);
+                if (intersection && intersection.type && (intersection.rings || intersection.paths)) {
+                  intersectingGeometries.push(intersection);
+                  if (checkedCount <= 5) {
+                    console.log("Added intersection geometry (fallback) for station", stationId, {
+                      type: intersection.type
+                    });
+                  }
+                } else {
+                  if (checkedCount <= 5) {
+                    console.warn("Intersection is invalid (fallback) for station", stationId);
+                  }
+                }
+              } catch (intersectErr) {
+                if (checkedCount <= 5) {
+                  console.error("Error calculating intersection for station", stationId, intersectErr);
+                }
+              }
+            }
+          } catch (err) {
+            if (checkedCount <= 5) {
+              console.error("Error checking station:", err);
+            }
+          }
+        }
+        
+        console.log("Fallback check complete:", {
+          checkedStations: checkedCount,
+          foundIntersections: intersectionCount,
+          intersectingGeometriesCount: intersectingGeometries.length
+        });
+        
+        if (intersectingGeometries.length > 0) {
+          try {
+            let unionGeometry;
+            
+            if (intersectingGeometries.length === 1) {
+              unionGeometry = intersectingGeometries[0];
+            } else {
+              try {
+                unionGeometry = geometryEngine.union(intersectingGeometries);
+                if (!unionGeometry) {
+                  throw new Error("Union with array returned null");
+                }
+              } catch (unionArrayErr) {
+                // Fallback to incremental union with area validation
+                unionGeometry = intersectingGeometries[0];
+                for (let i = 1; i < intersectingGeometries.length; i++) {
+                  const newUnion = geometryEngine.union(unionGeometry, intersectingGeometries[i]);
+                  if (newUnion) {
+                    const oldArea = geometryEngine.geodesicArea(unionGeometry, "square-meters");
+                    const newArea = geometryEngine.geodesicArea(newUnion, "square-meters");
+                    if (newArea >= oldArea) {
+                      unionGeometry = newUnion;
+                    }
+                  }
+                }
+              }
+            }
+            
+            const neighborhoodArea = geometryEngine.geodesicArea(neighborhoodGeometry, "square-meters");
+            const coverageArea = geometryEngine.geodesicArea(unionGeometry, "square-meters");
+            
+            if (neighborhoodArea > 0 && coverageArea > 0) {
+              coveragePercentage = Math.min(100, Math.max(0, (coverageArea / neighborhoodArea) * 100));
+            }
+          } catch (areaErr) {
+            console.error("Error calculating coverage area (fallback):", areaErr);
+          }
+        }
+      }
+
+      console.log("Intersecting station IDs:", Array.from(intersectingStationIds));
+      console.log("Final coverage percentage:", coveragePercentage);
+
+      if (intersectingStationIds.size > 0) {
+        const stationIdsArray = Array.from(intersectingStationIds);
+        const definitionExpression = `id IN ('${stationIdsArray.join("','")}')`;
+        console.log("Setting definition expression:", definitionExpression, {
+          stationIdsArray: stationIdsArray.slice(0, 5),
+          totalIds: stationIdsArray.length,
+          layerTitle: stationsLayer.title
+        });
+        
+        stationsLayer.definitionExpression = definitionExpression;
+        
+        setTimeout(async () => {
+          const count = await stationsLayer.queryFeatureCount();
+          console.log("Station count after filtering:", count);
+        }, 100);
+        
+        const population = neighborhoodAttrs.population || neighborhoodAttrs.POPULATION || 0;
+        const populationNum = typeof population === "number" ? population : Number(population) || 0;
+        const uncoveredPopulation = populationNum > 0 && coveragePercentage > 0 
+          ? Math.round(populationNum * (1 - coveragePercentage / 100))
+          : null;
+        
+        let coverageText = ` (${coveragePercentage.toFixed(2)}% coverage)`;
+        if (uncoveredPopulation !== null && uncoveredPopulation >= 0) {
+          coverageText += ` - ${uncoveredPopulation} people need coverage`;
+        }
+        
+        console.log("Status message:", `Showing ${stationIdsArray.length} stations intersecting with ${neighborhoodAttrs.name || "neighborhood"}${coverageText}`);
+        setStatus?.(`Showing ${stationIdsArray.length} stations intersecting with ${neighborhoodAttrs.name || "neighborhood"}${coverageText}`);
+      } else {
+        console.log("No intersecting stations found");
+        stationsLayer.definitionExpression = "1=0";
+        setStatus?.(`No stations intersect with ${neighborhoodAttrs.name || "neighborhood"}`);
+      }
+    };
+
+    if (viewRef.current && neighborhoodsLayer) {
+      const handlerHandle = viewRef.current.on("click", clickHandler);
+      neighborhoodClickHandlerRef.current = handlerHandle;
+    }
+  }, []);
+
+  const showAccessibilityHeatmap = useCallback(async () => {
+    if (!neighborhoodsLayerRef.current || !stationsLayerRef.current || !viewRef.current) {
+      setStatus?.("Neighborhoods and stations layers must be loaded first.");
+      return;
+    }
+
+    if (!stationsFeaturesRef.current || !stationsFeaturesRef.current.stations) {
+      setStatus?.("Stations data is missing. Please load stations first.");
+      return;
+    }
+
+    setStatus?.("Calculating accessibility coverage for neighborhoods...");
+
+    // Remove click handler if exists
+    if (neighborhoodClickHandlerRef.current) {
+      if (typeof neighborhoodClickHandlerRef.current === "function") {
+        neighborhoodClickHandlerRef.current();
+      } else if (neighborhoodClickHandlerRef.current && typeof neighborhoodClickHandlerRef.current.remove === "function") {
+        neighborhoodClickHandlerRef.current.remove();
+      }
+      neighborhoodClickHandlerRef.current = null;
+    }
+
+    // Reset stations layer filter to show all stations
+    if (stationsLayerRef.current) {
+      stationsLayerRef.current.definitionExpression = null;
+      console.log("Reset stations layer filter to show all stations for heatmap");
+    }
+
+    try {
+      const neighborhoodsLayer = neighborhoodsLayerRef.current;
+      const { default: Query } = await import("@arcgis/core/rest/support/Query");
+
+      const query = new Query();
+      query.where = "1=1";
+      query.returnGeometry = true;
+      query.outFields = ["*"];
+
+      const { features } = await neighborhoodsLayer.queryFeatures(query);
+      
+      console.log("Calculating coverage for", features.length, "neighborhoods");
+
+      const coverageData = [];
+      
+      for (let i = 0; i < features.length; i++) {
+        const feature = features[i];
+        const coverage = await calculateNeighborhoodCoverage(feature.geometry, feature.attributes);
+        coverageData.push({
+          objectId: feature.attributes.OBJECTID || feature.attributes.__OBJECTID || i,
+          coverage: coverage
+        });
+        
+        if ((i + 1) % 10 === 0) {
+          setStatus?.(`Calculating coverage: ${i + 1}/${features.length} neighborhoods...`);
+        }
+      }
+
+      // Get original neighborhoods GeoJSON
+      if (!neighborhoodsFeaturesRef.current) {
+        setStatus?.("Neighborhoods data not found. Please reload neighborhoods.");
+        return;
+      }
+
+      const originalGeoJSON = neighborhoodsFeaturesRef.current;
+      
+      // Create a map: index from queryFeatures -> coverage
+      const indexToCoverageMap = new Map();
+      for (let i = 0; i < coverageData.length; i++) {
+        indexToCoverageMap.set(i, coverageData[i].coverage);
+      }
+      
+      // Also create a map by feature ID for matching
+      const idToCoverageMap = new Map();
+      for (let i = 0; i < features.length && i < coverageData.length; i++) {
+        const feature = features[i];
+        const featureId = feature.attributes.id || feature.attributes.ID || feature.properties?.id;
+        if (featureId) {
+          idToCoverageMap.set(String(featureId), coverageData[i].coverage);
+        }
+      }
+
+      // Create updated GeoJSON with coverage
+      const updatedGeoJSON = {
+        type: "FeatureCollection",
+        features: originalGeoJSON.features.map((feature, index) => {
+          // Try to match by ID first, then by index
+          const featureId = feature.id || feature.properties?.id;
+          let coverage = 0;
+          
+          if (featureId && idToCoverageMap.has(String(featureId))) {
+            coverage = idToCoverageMap.get(String(featureId));
+          } else if (indexToCoverageMap.has(index)) {
+            coverage = indexToCoverageMap.get(index);
+          }
+          
+          if (index < 10) {
+            console.log(`Feature ${index} coverage:`, {
+              featureId,
+              propsId: feature.properties?.id,
+              coverage,
+              matchedById: featureId && idToCoverageMap.has(String(featureId)),
+              matchedByIndex: indexToCoverageMap.has(index)
+            });
+          }
+          
+          // Ensure admin_level is preserved
+          const props = {
+            ...feature.properties,
+            coverage: coverage
+          };
+          
+          // Ensure admin_level is set (it should already be there from original GeoJSON)
+          if (!props.admin_level && feature.properties?.admin_level) {
+            props.admin_level = feature.properties.admin_level;
+          }
+          
+          return {
+            ...feature,
+            properties: props
+          };
+        })
+      };
+
+      // Remove old neighborhoods layer
+      if (neighborhoodsLayerRef.current && viewRef.current?.map) {
+        viewRef.current.map.remove(neighborhoodsLayerRef.current);
+      }
+
+      // Create new layer with coverage
+      const { default: GeoJSONLayer } = await import("@arcgis/core/layers/GeoJSONLayer");
+      const [{ default: SimpleRenderer }, { default: SimpleFillSymbol }, { default: SimpleLineSymbol }] = await Promise.all([
+        import("@arcgis/core/renderers/SimpleRenderer"),
+        import("@arcgis/core/symbols/SimpleFillSymbol"),
+        import("@arcgis/core/symbols/SimpleLineSymbol")
+      ]);
+      
+      const blob = new Blob([JSON.stringify(updatedGeoJSON)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+
+      // Log sample coverage values for debugging
+      console.log("Sample coverage values:", updatedGeoJSON.features.slice(0, 5).map(f => ({
+        id: f.id || f.properties?.id,
+        name: f.properties?.name,
+        coverage: f.properties?.coverage
+      })));
+
+      const heatmapLayer = new GeoJSONLayer({
+        url: url,
+        title: "neighborhoods (heatmap)",
+        fields: [
+          { name: "coverage", type: "double" },
+          { name: "name", type: "string" },
+          { name: "population", type: "double" },
+          { name: "admin_level", type: "string" }
+        ],
+        popupTemplate: {
+          title: "{name}",
+          content: [{
+            type: "text",
+            text: "Name: <b>{name}</b><br/>Population: <b>{population}</b><br/>Coverage: <b>{expression/coverage-formatted}%</b><br/>Covered Population: <b>{expression/covered-population}</b><br/>Population that needs coverage: <b>{expression/uncovered-population}</b>"
+          }],
+          expressionInfos: [
+            {
+              name: "coverage-formatted",
+              title: "Coverage",
+              expression: "Round($feature.coverage * 100) / 100"
+            },
+            {
+              name: "covered-population",
+              title: "Covered Population",
+              expression: "Round($feature.population * $feature.coverage / 100)"
+            },
+            {
+              name: "uncovered-population",
+              title: "Population that needs coverage",
+              expression: "Round($feature.population * (100 - $feature.coverage) / 100)"
+            }
+          ]
+        },
+        renderer: new SimpleRenderer({
+          symbol: new SimpleFillSymbol({
+            color: [128, 128, 128, 0.5],
+            outline: new SimpleLineSymbol({
+              color: [110, 110, 110],
+              width: 1
+            })
+          }),
+          visualVariables: [{
+            type: "color",
+            field: "coverage",
+            stops: [
+              { value: 0, color: [255, 0, 0, 0.7], label: "0%" },
+              { value: 25, color: [255, 165, 0, 0.7], label: "25%" },
+              { value: 50, color: [255, 255, 0, 0.7], label: "50%" },
+              { value: 75, color: [144, 238, 144, 0.7], label: "75%" },
+              { value: 100, color: [0, 255, 0, 0.7], label: "100%" }
+            ]
+          }]
+        })
+      });
+
+      await heatmapLayer.load();
+      viewRef.current.map.add(heatmapLayer);
+      neighborhoodsLayerRef.current = heatmapLayer;
+
+      const avgCoverage = coverageData.reduce((sum, d) => sum + d.coverage, 0) / coverageData.length;
+      setStatus?.(`Accessibility heatmap displayed. Average coverage: ${avgCoverage.toFixed(2)}%`);
+
+    } catch (err) {
+      console.error("Error showing accessibility heatmap:", err);
+      setStatus?.(`Error: ${err.message}`);
+    }
+  }, [calculateNeighborhoodCoverage, setStatus]);
+
+  return { mapRef, addGeoJsonLayer, goToBbox, updateTransportFilters, updateAdminLevelFilters, setupNeighborhoodClickFilter, showAccessibilityHeatmap };
 }

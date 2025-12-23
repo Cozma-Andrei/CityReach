@@ -59,7 +59,7 @@ function App() {
     return [south, west, north, east];
   }
 
-  const { mapRef, addGeoJsonLayer, goToBbox, updateTransportFilters, updateAdminLevelFilters, calculateIntersections } = useGeoMap({
+  const { mapRef, addGeoJsonLayer, goToBbox, updateTransportFilters, updateAdminLevelFilters, setupNeighborhoodClickFilter, showAccessibilityHeatmap } = useGeoMap({
     onBboxChange: setBbox,
     initialBboxParts: parseBboxInput(DEFAULT_BBOX),
     setStatus,
@@ -141,6 +141,38 @@ function App() {
       console.log("Passing to addGeoJsonLayer:", { type, buffersToPass: !!buffersToPass, buffersFeatures: buffersToPass?.features?.length });
       await addGeoJsonLayer(data.geojson, type, buffersToPass);
       setStatus(`Loaded ${data.geojson.features.length} ${type} from Firestore.`);
+    } catch (err) {
+      setStatus(err.response?.data?.error || err.message);
+    }
+  }
+
+  async function handleLoadBoth() {
+    try {
+      setStatus("Loading stations and neighborhoods from Firestore…");
+      
+      const [stationsResponse, neighborhoodsResponse] = await Promise.all([
+        apiClient.get("/api/feature-layers/stations"),
+        apiClient.get("/api/feature-layers/neighborhoods")
+      ]);
+      
+      const stationsData = stationsResponse.data;
+      const neighborhoodsData = neighborhoodsResponse.data;
+      
+      setGeojson(null);
+      setCleanedGeojson(null);
+      setErrors([]);
+      
+      const stationsBuffers = stationsData.buffers ? stationsData.buffers : null;
+      
+      await addGeoJsonLayer(stationsData.geojson, "stations", stationsBuffers);
+      await addGeoJsonLayer(neighborhoodsData.geojson, "neighborhoods", null);
+      
+      await new Promise(resolve => setTimeout(resolve, 500));
+      await setupNeighborhoodClickFilter();
+      
+      setStatus(
+        `Loaded ${stationsData.geojson.features.length} stations and ${neighborhoodsData.geojson.features.length} neighborhoods. Click on a neighborhood to filter stations.`
+      );
     } catch (err) {
       setStatus(err.response?.data?.error || err.message);
     }
@@ -321,8 +353,11 @@ function App() {
             </button>
             <button onClick={() => handleLoad("stations")}>Load saved stations</button>
             <button onClick={() => handleLoad("neighborhoods")}>Load saved neighborhoods</button>
-            <button onClick={() => calculateIntersections(() => handleLoad("stations"), () => handleLoad("neighborhoods"))} style={{ backgroundColor: "#f59e0b", color: "white" }}>
-              Calculate Intersections
+            <button onClick={handleLoadBoth} style={{ backgroundColor: "#10b981", color: "white" }}>
+              Load Both
+            </button>
+            <button onClick={showAccessibilityHeatmap} style={{ backgroundColor: "#f59e0b", color: "white" }}>
+              Show Accessibility Heatmap
             </button>
           </div>
           <div className="status">Status: {status}</div>
