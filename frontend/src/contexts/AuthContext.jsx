@@ -20,6 +20,7 @@ export function useAuth() {
 
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
+  const [userRole, setUserRole] = useState(null);
   const [loading, setLoading] = useState(true);
 
   async function signup(email, password) {
@@ -107,8 +108,11 @@ export function AuthProvider({ children }) {
             console.log("Creating user document for existing user with data:", userData);
             await setDoc(userDocRef, userData);
             console.log("User document created in Firestore for existing user");
+            setUserRole("user");
           } else {
             console.log("User document already exists in Firestore");
+            const userData = userDoc.data();
+            setUserRole(userData?.role || "user");
           }
         } catch (error) {
           console.error("Error checking/creating user document in Firestore:", error);
@@ -116,6 +120,8 @@ export function AuthProvider({ children }) {
           console.error("Error message:", error.message);
           console.error("Full error:", error);
         }
+      } else {
+        setUserRole(null);
       }
       
       setLoading(false);
@@ -126,6 +132,7 @@ export function AuthProvider({ children }) {
 
   const value = {
     currentUser,
+    userRole,
     signup,
     login,
     logout,

@@ -2099,5 +2099,105 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     }
   }, [calculateNeighborhoodCoverage, setStatus]);
 
-  return { mapRef, addGeoJsonLayer, goToBbox, updateTransportFilters, updateAdminLevelFilters, setupNeighborhoodClickFilter, showAccessibilityHeatmap };
+  const searchFeature = useCallback(async (searchQuery, type = "both", setStatus) => {
+    if (!viewRef.current || !searchQuery || searchQuery.trim() === "") {
+      return null;
+    }
+
+    const searchLower = searchQuery.toLowerCase().trim();
+    let foundGraphic = null;
+
+    try {
+      const { default: Query } = await import("@arcgis/core/rest/support/Query");
+      const query = new Query();
+      query.where = "1=1";
+      query.returnGeometry = true;
+      query.outFields = ["*"];
+
+      let foundType = null;
+
+      if (type === "stations" || type === "both") {
+        if (!stationsLayerRef.current) {
+          if (type === "stations") {
+            setStatus?.("Stations layer not loaded. Please load stations first.");
+            return null;
+          }
+        } else {
+          const originalDefinition = stationsLayerRef.current.definitionExpression;
+          stationsLayerRef.current.definitionExpression = null;
+          const { features } = await stationsLayerRef.current.queryFeatures(query);
+          if (originalDefinition !== undefined) {
+            stationsLayerRef.current.definitionExpression = originalDefinition;
+          }
+          console.log("Searching in", features.length, "stations");
+          for (const graphic of features) {
+            const attrs = graphic.attributes || {};
+            const name = lookupCI(attrs, "name") || "";
+            if (name && name.toLowerCase().includes(searchLower)) {
+              console.log("Found station:", name, "attrs:", attrs);
+              foundGraphic = graphic;
+              foundType = "station";
+              break;
+            }
+          }
+        }
+      }
+
+      if (!foundGraphic && (type === "neighborhoods" || type === "both")) {
+        if (!neighborhoodsLayerRef.current) {
+          if (type === "neighborhoods") {
+            setStatus?.("Neighborhoods layer not loaded. Please load neighborhoods first.");
+            return null;
+          }
+        } else {
+          const originalDefinition = neighborhoodsLayerRef.current.definitionExpression;
+          neighborhoodsLayerRef.current.definitionExpression = null;
+          const { features } = await neighborhoodsLayerRef.current.queryFeatures(query);
+          if (originalDefinition !== undefined) {
+            neighborhoodsLayerRef.current.definitionExpression = originalDefinition;
+          }
+          console.log("Searching in", features.length, "neighborhoods");
+          for (const graphic of features) {
+            const attrs = graphic.attributes || {};
+            const name = lookupCI(attrs, "name") || "";
+            if (name && name.toLowerCase().includes(searchLower)) {
+              console.log("Found neighborhood:", name, "attrs:", attrs);
+              foundGraphic = graphic;
+              foundType = "neighborhood";
+              break;
+            }
+          }
+        }
+      }
+
+      if (foundGraphic && foundGraphic.geometry) {
+        const zoomLevel = foundType === "neighborhood" ? 14 : 16;
+        
+        await viewRef.current.goTo({
+          target: foundGraphic.geometry,
+          zoom: zoomLevel
+        });
+        
+        setTimeout(() => {
+          viewRef.current.popup.open({
+            features: [foundGraphic],
+            location: foundGraphic.geometry
+          });
+        }, 300);
+        
+        const featureName = lookupCI(foundGraphic.attributes, "name") || "Unknown";
+        setStatus?.(`Found: ${featureName}`);
+        return foundGraphic;
+      } else {
+        setStatus?.("No matching station or neighborhood found.");
+      }
+    } catch (err) {
+      console.error("Error searching feature:", err);
+      setStatus?.("Error searching. Please try again.");
+    }
+
+    return null;
+  }, []);
+
+  return { mapRef, addGeoJsonLayer, goToBbox, updateTransportFilters, updateAdminLevelFilters, setupNeighborhoodClickFilter, showAccessibilityHeatmap, searchFeature };
 }

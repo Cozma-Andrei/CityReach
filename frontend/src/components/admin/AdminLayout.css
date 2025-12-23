@@ -1,0 +1,105 @@
+.admin-layout {
+  min-height: 100vh;
+  background: #0a0f1e;
+}
+
+.admin-nav {
+  background: #0b1324;
+  border-bottom: 1px solid #1f2c47;
+  padding: 16px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.admin-nav h2 {
+  color: #e2e8f0;
+  margin: 0;
+  font-size: 20px;
+}
+
+.admin-nav-links {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+}
+
+.admin-nav-links a {
+  color: #9fb4d5;
+  text-decoration: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.admin-nav-links a:first-child {
+  margin-left: 16px;
+}
+
+.admin-nav-links a:hover {
+  background: #1a2332;
+  color: #e2e8f0;
+}
+
+.admin-nav-links a.active {
+  background: #1f2c47;
+  color: #8fb5ff;
+}
+
+.admin-nav-links .back-link {
+  margin-left: 32px;
+  padding-left: 32px;
+  border-left: 1px solid #1f2c47;
+  background: linear-gradient(135deg, #3b82f6, #2563eb) !important;
+  color: white !important;
+  padding: 10px 24px !important;
+  border-radius: 10px !important;
+  font-weight: 700 !important;
+  text-align: center !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3) !important;
+  transition: transform 0.2s, box-shadow 0.2s !important;
+}
+
+.admin-nav-links .back-link:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8) !important;
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4) !important;
+  color: white !important;
+}
+
+.admin-content {
+  padding: 0;
+}
+
+.admin-forbidden {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: #e2e8f0;
+  text-align: center;
+}
+
+.admin-forbidden h1 {
+  color: #ef4444;
+  margin-bottom: 16px;
+}
+
+.admin-forbidden a {
+  margin-top: 24px;
+  color: #8fb5ff;
+  text-decoration: none;
+  padding: 12px 24px;
+  background: #1f2c47;
+  border-radius: 8px;
+}
+
+.admin-forbidden a:hover {
+  background: #2a3a52;
+}

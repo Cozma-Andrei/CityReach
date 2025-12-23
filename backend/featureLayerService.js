@@ -346,6 +346,13 @@ async function readStations(userId) {
   const stationFeatures = [];
   const bufferFeatures = [];
   
+  if (snapshot.empty) {
+    return {
+      stations: { type: "FeatureCollection", features: [] },
+      buffers: { type: "FeatureCollection", features: [] }
+    };
+  }
+  
   snapshot.forEach(doc => {
     const data = doc.data();
     const location = data.location;
@@ -411,6 +418,13 @@ async function readNeighborhoods(userId) {
   const snapshot = await db.collection("neighborhoods").where("userId", "==", userId).get();
   
   const features = [];
+  
+  if (snapshot.empty) {
+    return {
+      type: "FeatureCollection",
+      features: []
+    };
+  }
   snapshot.forEach(doc => {
     const data = doc.data();
     
