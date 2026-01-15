@@ -2099,12 +2099,16 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     }
   }, [calculateNeighborhoodCoverage, setStatus]);
 
+  const normalizeString = (str) => {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  };
+
   const searchFeature = useCallback(async (searchQuery, type = "both", setStatus) => {
     if (!viewRef.current || !searchQuery || searchQuery.trim() === "") {
       return null;
     }
 
-    const searchLower = searchQuery.toLowerCase().trim();
+    const searchLower = normalizeString(searchQuery.trim());
     let foundGraphic = null;
 
     try {
@@ -2133,7 +2137,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
           for (const graphic of features) {
             const attrs = graphic.attributes || {};
             const name = lookupCI(attrs, "name") || "";
-            if (name && name.toLowerCase().includes(searchLower)) {
+            if (name && normalizeString(name).includes(searchLower)) {
               console.log("Found station:", name, "attrs:", attrs);
               foundGraphic = graphic;
               foundType = "station";
@@ -2160,7 +2164,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
           for (const graphic of features) {
             const attrs = graphic.attributes || {};
             const name = lookupCI(attrs, "name") || "";
-            if (name && name.toLowerCase().includes(searchLower)) {
+            if (name && normalizeString(name).includes(searchLower)) {
               console.log("Found neighborhood:", name, "attrs:", attrs);
               foundGraphic = graphic;
               foundType = "neighborhood";
