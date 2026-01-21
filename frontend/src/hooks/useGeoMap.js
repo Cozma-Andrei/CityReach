@@ -45,6 +45,10 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
   const isInitializedRef = useRef(false);
   const currentFiltersRef = useRef(transportFilters);
   const currentAdminLevelFiltersRef = useRef(adminLevelFilters);
+  const popupWatchHandleRef = useRef(null);
+  const featureWatchHandleRef = useRef(null);
+  const clickHandleRef = useRef(null);
+  const currentBufferStationIdRef = useRef(null);
 
   const addGeoJsonLayer = useCallback(async (featureCollection, title = "Layer", buffersData = null) => {
     if (!featureCollection) return;
@@ -54,6 +58,16 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     
     const isStations = title.toLowerCase() === "stations" || title.toLowerCase().includes("station");
     const isNeighborhoods = title.toLowerCase() === "neighborhoods" || title.toLowerCase().includes("neighborhood");
+    
+    if (highlightGraphicsLayerRef.current) {
+      highlightGraphicsLayerRef.current.removeAll();
+      console.log("Cleared neighborhood highlight");
+    }
+    if (bufferGraphicsRef.current) {
+      bufferGraphicsRef.current.removeAll();
+      console.log("Cleared station buffers");
+    }
+    currentBufferStationIdRef.current = null;
     
     const imports = [import("@arcgis/core/layers/GeoJSONLayer")];
     if (isStations) {
@@ -87,12 +101,59 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     
     if (isStations && stationsLayerRef.current && viewRef.current?.map && stationsLayerRef.current !== layerRef.current) {
       console.log("Removing old stations layer:", stationsLayerRef.current.title);
+      if (popupWatchHandleRef.current) {
+        popupWatchHandleRef.current.remove();
+        popupWatchHandleRef.current = null;
+        console.log("Removed old popup watch handler");
+      }
+      if (featureWatchHandleRef.current) {
+        featureWatchHandleRef.current.remove();
+        featureWatchHandleRef.current = null;
+        console.log("Removed old feature watch handler");
+      }
+      if (clickHandleRef.current) {
+        clickHandleRef.current.remove();
+        clickHandleRef.current = null;
+        console.log("Removed old click handler");
+      }
+      if (highlightGraphicsLayerRef.current) {
+        highlightGraphicsLayerRef.current.removeAll();
+        console.log("Cleared neighborhood highlight");
+      }
+      if (bufferGraphicsRef.current) {
+        bufferGraphicsRef.current.removeAll();
+        console.log("Cleared station buffers");
+      }
+      stationsLayerRef.current.definitionExpression = null;
+      console.log("Cleared station filter");
       viewRef.current.map.remove(stationsLayerRef.current);
       stationsLayerRef.current = null;
     }
     
     if (isNeighborhoods && neighborhoodsLayerRef.current && viewRef.current?.map && neighborhoodsLayerRef.current !== layerRef.current) {
       console.log("Removing old neighborhoods layer:", neighborhoodsLayerRef.current.title);
+      if (popupWatchHandleRef.current) {
+        popupWatchHandleRef.current.remove();
+        popupWatchHandleRef.current = null;
+        console.log("Removed old popup watch handler");
+      }
+      if (featureWatchHandleRef.current) {
+        featureWatchHandleRef.current.remove();
+        featureWatchHandleRef.current = null;
+        console.log("Removed old feature watch handler");
+      }
+      if (highlightGraphicsLayerRef.current) {
+        highlightGraphicsLayerRef.current.removeAll();
+        console.log("Cleared neighborhood highlight");
+      }
+      if (bufferGraphicsRef.current) {
+        bufferGraphicsRef.current.removeAll();
+        console.log("Cleared station buffers");
+      }
+      if (stationsLayerRef.current) {
+        stationsLayerRef.current.definitionExpression = null;
+        console.log("Cleared station filter");
+      }
       viewRef.current.map.remove(neighborhoodsLayerRef.current);
       neighborhoodsLayerRef.current = null;
     }
@@ -164,59 +225,14 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
 
     const popupTemplate = isFromFirestore && isStations
       ? {
-          title: (evt) => {
-            const graphic = evt?.graphic;
-            if (!graphic) return "Station";
-            
-            const attrs = graphic.attributes || {};
-            let props = {};
-            
-            const objectId = attrs.__OBJECTID;
-            if (objectId !== undefined && prepared.features && prepared.features[objectId]) {
-              props = prepared.features[objectId].properties || {};
-            } else {
-              const featureId = attrs.id || attrs.ID || objectId;
-              if (featureId !== undefined && featuresMap.has(featureId)) {
-                props = featuresMap.get(featureId).properties || {};
-              } else if (featuresMap.has(String(featureId))) {
-                props = featuresMap.get(String(featureId)).properties || {};
-              }
-            }
-            
-            return attrs.name || props.name || "Station";
-          },
-          content: (evt) => {
-            const graphic = evt?.graphic;
-            if (!graphic) return "";
-            
-            const attrs = graphic.attributes || {};
-            let props = {};
-            
-            const objectId = attrs.__OBJECTID;
-            if (objectId !== undefined && prepared.features && prepared.features[objectId]) {
-              props = prepared.features[objectId].properties || {};
-            } else {
-              const featureId = attrs.id || attrs.ID || objectId;
-              if (featureId !== undefined && featuresMap.has(featureId)) {
-                props = featuresMap.get(featureId).properties || {};
-              } else if (featuresMap.has(String(featureId))) {
-                props = featuresMap.get(String(featureId)).properties || {};
-              }
-            }
-            
-            const rows = [];
-            const name = attrs.name || props.name;
-            const type = attrs.type || props.type;
-            const bufferRadius = attrs.bufferRadius || props.bufferRadius;
-            const lines = attrs.lines || props.lines;
-            
-            if (name) rows.push(`<div><b>Name:</b> ${name}</div>`);
-            if (type) rows.push(`<div><b>Type:</b> ${type}</div>`);
-            if (lines) rows.push(`<div><b>Lines:</b> ${lines}</div>`);
-            if (bufferRadius) rows.push(`<div><b>Buffer Radius:</b> ${bufferRadius} m</div>`);
-            
-            return rows.length > 0 ? `<div style="font-size:14px; line-height:1.4;">${rows.join("")}</div>` : "";
-          },
+          title: "{name}",
+          content: `
+            <div style="font-size:14px; line-height:1.6;">
+              <div><b>Type:</b> {type}</div>
+              <div><b>Lines:</b> {lines}</div>
+              <div><b>Buffer Radius:</b> {bufferRadius} m</div>
+            </div>
+          `
         }
       : isFromFirestore && isNeighborhoods
       ? {
@@ -483,6 +499,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
       url,
       title,
       outFields: ["*"],
+      popupEnabled: true,
       fields: isFromFirestore 
         ? (isStations 
           ? [
@@ -580,8 +597,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
               return;
             }
             
-            bufferGraphicsRef.current.removeAll();
-            
             const attrs = graphic.attributes || {};
             const objectId = attrs.__OBJECTID;
             const attrsId = attrs.id || attrs.ID;
@@ -629,7 +644,15 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
               }
             }
             
-            console.log("Found station feature:", stationFeature, "stationId:", stationId);
+            console.log("Found station feature:", stationFeature, "stationId:", stationId, "previousBufferStationId:", currentBufferStationIdRef.current);
+            
+            if (currentBufferStationIdRef.current !== stationId) {
+              bufferGraphicsRef.current.removeAll();
+              currentBufferStationIdRef.current = null;
+            } else if (currentBufferStationIdRef.current === stationId) {
+              console.log("Buffer already shown for this station, skipping");
+              return;
+            }
             
             if (stationId && stationsFeaturesRef.current.buffers?.features) {
               console.log("Searching for buffer with stationId:", stationId, "Total buffers:", stationsFeaturesRef.current.buffers.features.length);
@@ -684,7 +707,8 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
                 });
                 
                 bufferGraphicsRef.current.add(bufferGraphic);
-                console.log("Buffer graphic added to layer");
+                currentBufferStationIdRef.current = stationId;
+                console.log("Buffer graphic added to layer for stationId:", stationId);
               } else {
                 console.log("No buffer feature found or missing geometry", { bufferFeature: !!bufferFeature, hasGeometry: bufferFeature?.geometry, stationId });
               }
@@ -697,6 +721,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
           console.log("Popup visibility changed:", visible, "selectedFeature:", viewRef.current.popup.selectedFeature, "isStations:", isStations);
           if (!visible && bufferGraphicsRef.current) {
             bufferGraphicsRef.current.removeAll();
+            currentBufferStationIdRef.current = null;
             console.log("Buffers cleared on popup close");
           } else if (visible) {
             const selectedGraphic = viewRef.current.popup.selectedFeature || viewRef.current.popup.graphic;
@@ -709,33 +734,16 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
             }
           }
         });
+        popupWatchHandleRef.current = popupWatchHandle;
         
-        const clickHandle = viewRef.current.on("click", async (event) => {
-          console.log("Map clicked");
-          const result = await viewRef.current.hitTest(event);
-          console.log("Hit test results:", result.results.map(r => ({ 
-            hasGraphic: !!r.graphic, 
-            layerTitle: r.graphic?.layer?.title,
-            layerType: r.graphic?.layer?.type,
-            currentLayerTitle: layer?.title,
-            matches: r.graphic?.layer === layer
-          })));
-          const graphic = result.results.find(r => r.graphic?.layer === layer)?.graphic;
-          console.log("Hit test result for stations layer:", graphic);
-          if (graphic && isStations) {
-            console.log("Showing buffer for station from click");
+        const featureWatchHandle = viewRef.current.popup.watch("selectedFeature", (graphic) => {
+          console.log("Selected feature changed:", graphic, "layer:", graphic?.layer?.title, "current layer:", layer?.title);
+          if (graphic && graphic.layer === layer && isStations && viewRef.current.popup.visible) {
+            console.log("Showing buffer for station from feature change");
             showBufferForStation(graphic);
-          } else if (!graphic && isStations) {
-            console.log("No graphic found for stations layer in hit test, checking popup");
-            setTimeout(() => {
-              const popupGraphic = viewRef.current.popup.selectedFeature || viewRef.current.popup.graphic;
-              if (popupGraphic && popupGraphic.layer === layer) {
-                console.log("Found graphic from popup, showing buffer");
-                showBufferForStation(popupGraphic);
-              }
-            }, 100);
           }
         });
+        featureWatchHandleRef.current = featureWatchHandle;
         
         console.log("Event listeners attached for buffers");
       } else {
@@ -764,6 +772,21 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     
     viewRef.current.map.add(layer);
     console.log("Layer added to map, total layers:", viewRef.current.map.layers.length, "layer titles:", viewRef.current.map.layers.map(l => l.title));
+    
+    if (isStations && stationsFeaturesRef.current?.buffers) {
+      const clickHandle = viewRef.current.on("click", async (event) => {
+        const result = await viewRef.current.hitTest(event);
+        const graphic = result.results.find(r => r.graphic?.layer === layer)?.graphic;
+        if (graphic) {
+          console.log("Clicked on station, opening popup");
+          viewRef.current.popup.open({
+            features: [graphic],
+            location: event.mapPoint,
+          });
+        }
+      });
+      clickHandleRef.current = clickHandle;
+    }
     
     await layer.when();
     console.log("Layer ready, features count:", await layer.queryFeatureCount());
@@ -827,6 +850,7 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
             breakpoint: false,
             position: "bottom-right",
           },
+          autoOpenPopup: true,
         }),
       });
       
@@ -928,7 +952,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
         ? null
         : `admin_level IN ('${includedLevels.join("','")}')`;
     
-    // Apply to neighborhoods layer (could be regular or heatmap)
     if (neighborhoodsLayerRef.current && neighborhoodsLayerRef.current.type === "geojson") {
       neighborhoodsLayerRef.current.definitionExpression = definitionExpression;
       console.log("Updated admin level filter for neighborhoods layer:", {
@@ -938,7 +961,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
       });
     }
     
-    // Also apply to layerRef if it's a neighborhoods layer
     if (layerRef.current && layerRef.current.type === "geojson") {
       const layerTitle = layerRef.current.title?.toLowerCase() || "";
       const isNeighborhoodsLayer = layerTitle === "neighborhoods" || layerTitle.includes("neighborhood");
@@ -1418,7 +1440,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
         }
       }
     } catch (queryErr) {
-      // Fallback to checking all stations
       for (let i = 0; i < stations.features.length; i++) {
         const stationFeature = stations.features[i];
         if (!stationFeature.geometry || stationFeature.geometry.type !== "Point") continue;
@@ -1462,20 +1483,17 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
     }
 
     try {
-      // Try to union all at once first
       let unionGeometry;
       try {
         if (intersectingGeometries.length === 1) {
           unionGeometry = intersectingGeometries[0];
         } else {
-          // Try union with array
           unionGeometry = geometryEngine.union(intersectingGeometries);
           if (!unionGeometry) {
             throw new Error("Union with array returned null");
           }
         }
       } catch (unionArrayErr) {
-        // Fallback to incremental union
         unionGeometry = intersectingGeometries[0];
         for (let i = 1; i < intersectingGeometries.length; i++) {
           const newUnion = geometryEngine.union(unionGeometry, intersectingGeometries[i]);
@@ -1494,7 +1512,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
       
       if (neighborhoodArea > 0 && coverageArea > 0) {
         const percentage = (coverageArea / neighborhoodArea) * 100;
-        // Clamp to 0-100%
         return Math.min(100, Math.max(0, percentage));
       }
     } catch (areaErr) {
@@ -1707,7 +1724,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
                   throw new Error("Union with array returned null");
                 }
               } catch (unionArrayErr) {
-                // Fallback to incremental union with area validation
                 unionGeometry = intersectingGeometries[0];
                 for (let i = 1; i < intersectingGeometries.length; i++) {
                   const newUnion = geometryEngine.union(unionGeometry, intersectingGeometries[i]);
@@ -1813,7 +1829,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
                   throw new Error("Union with array returned null");
                 }
               } catch (unionArrayErr) {
-                // Fallback to incremental union with area validation
                 unionGeometry = intersectingGeometries[0];
                 for (let i = 1; i < intersectingGeometries.length; i++) {
                   const newUnion = geometryEngine.union(unionGeometry, intersectingGeometries[i]);
@@ -1854,6 +1869,43 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
         
         stationsLayer.definitionExpression = definitionExpression;
         
+        const highlightNeighborhood = async () => {
+          try {
+            if (!highlightGraphicsLayerRef.current) {
+              const { default: GraphicsLayer } = await import("@arcgis/core/layers/GraphicsLayer");
+              const highlightLayer = new GraphicsLayer({ title: "Highlighted Neighborhood" });
+              viewRef.current.map.add(highlightLayer);
+              highlightGraphicsLayerRef.current = highlightLayer;
+            }
+            
+            highlightGraphicsLayerRef.current.removeAll();
+            
+            const { default: SimpleFillSymbol } = await import("@arcgis/core/symbols/SimpleFillSymbol");
+            const { default: SimpleLineSymbol } = await import("@arcgis/core/symbols/SimpleLineSymbol");
+            const { default: Graphic } = await import("@arcgis/core/Graphic");
+            
+            const highlightSymbol = new SimpleFillSymbol({
+              color: [0, 100, 255, 0.2],
+              outline: new SimpleLineSymbol({
+                color: [0, 100, 255, 0.6],
+                width: 2
+              })
+            });
+            
+            const highlightGraphic = new Graphic({
+              geometry: neighborhoodGeometry,
+              symbol: highlightSymbol
+            });
+            
+            highlightGraphicsLayerRef.current.add(highlightGraphic);
+            console.log("Neighborhood highlighted");
+          } catch (err) {
+            console.error("Error highlighting neighborhood:", err);
+          }
+        };
+        
+        highlightNeighborhood();
+        
         setTimeout(async () => {
           const count = await stationsLayer.queryFeatureCount();
           console.log("Station count after filtering:", count);
@@ -1876,6 +1928,43 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
         console.log("No intersecting stations found");
         stationsLayer.definitionExpression = "1=0";
         setStatus?.(`No stations intersect with ${neighborhoodAttrs.name || "neighborhood"}`);
+        
+        const highlightNeighborhood = async () => {
+          try {
+            if (!highlightGraphicsLayerRef.current) {
+              const { default: GraphicsLayer } = await import("@arcgis/core/layers/GraphicsLayer");
+              const highlightLayer = new GraphicsLayer({ title: "Highlighted Neighborhood" });
+              viewRef.current.map.add(highlightLayer);
+              highlightGraphicsLayerRef.current = highlightLayer;
+            }
+            
+            highlightGraphicsLayerRef.current.removeAll();
+            
+            const { default: SimpleFillSymbol } = await import("@arcgis/core/symbols/SimpleFillSymbol");
+            const { default: SimpleLineSymbol } = await import("@arcgis/core/symbols/SimpleLineSymbol");
+            const { default: Graphic } = await import("@arcgis/core/Graphic");
+            
+            const highlightSymbol = new SimpleFillSymbol({
+              color: [0, 100, 255, 0.2],
+              outline: new SimpleLineSymbol({
+                color: [0, 100, 255, 0.6],
+                width: 2
+              })
+            });
+            
+            const highlightGraphic = new Graphic({
+              geometry: neighborhoodGeometry,
+              symbol: highlightSymbol
+            });
+            
+            highlightGraphicsLayerRef.current.add(highlightGraphic);
+            console.log("Neighborhood highlighted (no coverage)");
+          } catch (err) {
+            console.error("Error highlighting neighborhood:", err);
+          }
+        };
+        
+        highlightNeighborhood();
       }
     };
 
@@ -1898,7 +1987,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
 
     setStatus?.("Calculating accessibility coverage for neighborhoods...");
 
-    // Remove click handler if exists
     if (neighborhoodClickHandlerRef.current) {
       if (typeof neighborhoodClickHandlerRef.current === "function") {
         neighborhoodClickHandlerRef.current();
@@ -1908,7 +1996,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
       neighborhoodClickHandlerRef.current = null;
     }
 
-    // Reset stations layer filter to show all stations
     if (stationsLayerRef.current) {
       stationsLayerRef.current.definitionExpression = null;
       console.log("Reset stations layer filter to show all stations for heatmap");
@@ -1942,7 +2029,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
         }
       }
 
-      // Get original neighborhoods GeoJSON
       if (!neighborhoodsFeaturesRef.current) {
         setStatus?.("Neighborhoods data not found. Please reload neighborhoods.");
         return;
@@ -1950,13 +2036,11 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
 
       const originalGeoJSON = neighborhoodsFeaturesRef.current;
       
-      // Create a map: index from queryFeatures -> coverage
       const indexToCoverageMap = new Map();
       for (let i = 0; i < coverageData.length; i++) {
         indexToCoverageMap.set(i, coverageData[i].coverage);
       }
       
-      // Also create a map by feature ID for matching
       const idToCoverageMap = new Map();
       for (let i = 0; i < features.length && i < coverageData.length; i++) {
         const feature = features[i];
@@ -1966,11 +2050,9 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
         }
       }
 
-      // Create updated GeoJSON with coverage
       const updatedGeoJSON = {
         type: "FeatureCollection",
         features: originalGeoJSON.features.map((feature, index) => {
-          // Try to match by ID first, then by index
           const featureId = feature.id || feature.properties?.id;
           let coverage = 0;
           
@@ -1990,13 +2072,11 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
             });
           }
           
-          // Ensure admin_level is preserved
           const props = {
             ...feature.properties,
             coverage: coverage
           };
           
-          // Ensure admin_level is set (it should already be there from original GeoJSON)
           if (!props.admin_level && feature.properties?.admin_level) {
             props.admin_level = feature.properties.admin_level;
           }
@@ -2008,12 +2088,10 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
         })
       };
 
-      // Remove old neighborhoods layer
       if (neighborhoodsLayerRef.current && viewRef.current?.map) {
         viewRef.current.map.remove(neighborhoodsLayerRef.current);
       }
 
-      // Create new layer with coverage
       const { default: GeoJSONLayer } = await import("@arcgis/core/layers/GeoJSONLayer");
       const [{ default: SimpleRenderer }, { default: SimpleFillSymbol }, { default: SimpleLineSymbol }] = await Promise.all([
         import("@arcgis/core/renderers/SimpleRenderer"),
@@ -2024,7 +2102,6 @@ export function useGeoMap({ onBboxChange, initialBboxParts, setStatus, transport
       const blob = new Blob([JSON.stringify(updatedGeoJSON)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
 
-      // Log sample coverage values for debugging
       console.log("Sample coverage values:", updatedGeoJSON.features.slice(0, 5).map(f => ({
         id: f.id || f.properties?.id,
         name: f.properties?.name,
