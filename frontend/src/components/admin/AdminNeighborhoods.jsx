@@ -193,6 +193,7 @@ export function AdminNeighborhoods() {
         name: formData.name,
         population: formData.population,
         admin_level: formData.admin_level,
+        userId: selectedUserId,
       });
       
       await loadNeighborhoods();
@@ -207,7 +208,9 @@ export function AdminNeighborhoods() {
     if (!confirm("Are you sure you want to delete this neighborhood?")) return;
 
     try {
-      await apiClient.delete(`/api/feature-layers/neighborhoods/${encodeURIComponent(neighborhoodId)}`);
+      await apiClient.delete(`/api/feature-layers/neighborhoods/${encodeURIComponent(neighborhoodId)}`, {
+        params: { userId: selectedUserId }
+      });
       await loadNeighborhoods();
     } catch (err) {
       console.error("Error deleting neighborhood:", err);

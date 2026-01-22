@@ -240,7 +240,7 @@ app.get("/api/feature-layers/:type", async (req, res) => {
 app.patch("/api/feature-layers/neighborhoods/:neighborhoodId", async (req, res) => {
   try {
     const { neighborhoodId } = req.params;
-    const { population, name, admin_level } = req.body;
+    const { population, name, admin_level, userId: targetUserId } = req.body;
     const userId = req.user?.uid;
     
     if (!userId) {
@@ -250,8 +250,18 @@ app.patch("/api/feature-layers/neighborhoods/:neighborhoodId", async (req, res) 
     const admin = initFirebase();
     const db = admin.firestore();
     
+    let finalUserId = userId;
+    
+    if (targetUserId && targetUserId !== userId) {
+      const userDoc = await db.collection("users").doc(userId).get();
+      if (!userDoc.exists || userDoc.data().role !== "admin") {
+        return res.status(403).json({ error: "Admin access required to edit other users' neighborhoods" });
+      }
+      finalUserId = targetUserId;
+    }
+    
     const neighborhoodsSnapshot = await db.collection("neighborhoods")
-      .where("userId", "==", userId)
+      .where("userId", "==", finalUserId)
       .where("id", "==", neighborhoodId)
       .limit(1)
       .get();
@@ -292,6 +302,7 @@ app.patch("/api/feature-layers/neighborhoods/:neighborhoodId", async (req, res) 
 app.delete("/api/feature-layers/neighborhoods/:neighborhoodId", async (req, res) => {
   try {
     const { neighborhoodId } = req.params;
+    const { userId: targetUserId } = req.query;
     const userId = req.user?.uid;
     
     if (!userId) {
@@ -301,8 +312,18 @@ app.delete("/api/feature-layers/neighborhoods/:neighborhoodId", async (req, res)
     const admin = initFirebase();
     const db = admin.firestore();
     
+    let finalUserId = userId;
+    
+    if (targetUserId && targetUserId !== userId) {
+      const userDoc = await db.collection("users").doc(userId).get();
+      if (!userDoc.exists || userDoc.data().role !== "admin") {
+        return res.status(403).json({ error: "Admin access required to delete other users' neighborhoods" });
+      }
+      finalUserId = targetUserId;
+    }
+    
     const neighborhoodsSnapshot = await db.collection("neighborhoods")
-      .where("userId", "==", userId)
+      .where("userId", "==", finalUserId)
       .where("id", "==", neighborhoodId)
       .limit(1)
       .get();
